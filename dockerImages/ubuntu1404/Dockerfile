@@ -16,7 +16,7 @@ RUN apt-get update \
         iputils-ping \
         jq \
         libcurl3 \
-        libicu55 \
+        libicu52 \
         libunwind8 \
         openssh-client \
         sudo \
