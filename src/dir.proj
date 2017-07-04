@@ -56,7 +56,7 @@
             Encoding="Unicode"/>
   </Target>
 
-  <Target Name="Build" DependsOnTargets="Restore;GenerateConstant">
+   <Target Name="Test" DependsOnTargets="Restore;GenerateConstant">
     <PropertyGroup Condition="'$(PackageRuntime)' == 'win7-x64'" >
         <TargetOS>OS_WINDOWS</TargetOS>
     </PropertyGroup> 
@@ -65,14 +65,11 @@
     </PropertyGroup> 
     <PropertyGroup Condition="'$(PackageRuntime)' != 'linux-x64' AND '$(PackageRuntime)' != 'osx.10.11-x64'" >
         <TargetOS>OS_LINUX</TargetOS>
-    </PropertyGroup> 
-    <Exec Command="dotnet build Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet build Agent.Listener\Agent.Listener.csproj -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet build Agent.Worker\Agent.Worker.csproj -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet build Test\Test.csproj -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
+    </PropertyGroup>
+    <Exec Command="(set VSTS_AGENT_SRC_DIR=$(MSBuildProjectDirectory)) &amp; dotnet test Test/Test.csproj -c $(BUILDCONFIG) --logger:trx /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
   </Target>
 
-   <Target Name="Publish" DependsOnTargets="Build">
+  <Target Name="Layout" DependsOnTargets="Restore;GenerateConstant">
     <PropertyGroup Condition="'$(PackageRuntime)' == 'win7-x64'" >
         <TargetOS>OS_WINDOWS</TargetOS>
     </PropertyGroup> 
@@ -82,32 +79,43 @@
     <PropertyGroup Condition="'$(PackageRuntime)' != 'linux-x64' AND '$(PackageRuntime)' != 'osx.10.11-x64'" >
         <TargetOS>OS_LINUX</TargetOS>
     </PropertyGroup> 
+
     <Exec Command="dotnet publish Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet publish Agent.Listener\Agent.Listener.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet publish Agent.Worker\Agent.Worker.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet publish Test\Test.csproj --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
-  </Target>
 
-  <Target Name="CreateLayout" DependsOnTargets="Clean;Publish">
-    <ItemGroup>  
+    <ItemGroup>
         <LayoutRootFiles Include="$(MSBuildProjectDirectory)/Misc/layoutroot/**"/>
         <LayoutBinFiles Include="$(MSBuildProjectDirectory)/Misc/layoutbin/**"/>
     </ItemGroup>  
 
     <Copy SourceFiles="@(LayoutRootFiles)"  DestinationFolder="$(MSBuildProjectDirectory)/../_layout/%(RecursiveDir)"/>
     <Copy SourceFiles="@(LayoutBinFiles)"  DestinationFolder="$(MSBuildProjectDirectory)/../_layout/bin/%(RecursiveDir)"/>
+  </Target>
 
+  <Target Name="Externals">
     <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20Download Externals" Importance="high"/>
+    <Message Text="%20%20%20%20%20%20%20%20%Get Externals" Importance="high"/>
     <Message Text="-----------------------------------------" Importance="high"/> 
 
-    <!--<Exec Command="bash $(MSBuildProjectDirectory)/Misc/externals.sh" ConsoleToMSBuild="True" />-->
+    <Exec Command="bash $(MSBuildProjectDirectory)/Misc/externals.sh" ConsoleToMSBuild="True" />
   </Target>
 
   <Target Name="Clean">
     <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20Clean build outputs" Importance="high"/>
+    <Message Text="%20%20%20%20%20%20%20%20%20Cleaning Build Outputs" Importance="high"/>
     <Message Text="-----------------------------------------" Importance="high"/> 
-    <Exec Command="git clean -fdx -e _dotnetsdk -e _downloads" ConsoleToMSBuild="true" />
+    <RemoveDir  
+            Directories="Microsoft.VisualStudio.Services.Agent\bin;
+                         Microsoft.VisualStudio.Services.Agent\obj;
+                         Agent.Listener\bin;
+                         Agent.Listener\obj;
+                         Agent.Worker\bin;
+                         Agent.Worker\obj;
+                         Test\bin;
+                         Test\obj;" />
+    <Message Text="-----------------------------------------" Importance="high"/>
+    <Message Text="%20%20%20%20%20%20%20Finish Clean Build Outputs" Importance="high"/>
+    <Message Text="-----------------------------------------" Importance="high"/> 
   </Target>
 </Project>

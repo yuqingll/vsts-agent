@@ -200,43 +200,48 @@ function copyBin ()
 
 function layout ()
 {
-    clean
-    restore
-    build
-    publish
-    
-    heading Layout ...
-    rm -Rf ${LAYOUT_DIR}
-    mkdir -p ${LAYOUT_DIR}/bin
-    for bin_copy_dir in ${bin_layout_dirs[@]}
-    do
-        copyBin ${bin_copy_dir}
-    done
+    dotnet msbuild "//NoLogo" "//t:Clean" || failed "clean build outputs"
 
-    if [[ "$define_os" == 'OS_WINDOWS' ]]; then
-        # TODO Make sure to package Release build instead of debug build
-        echo Copying Agent.Service
-        cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
-    fi
-    
-    cp -Rf ./Misc/layoutroot/* ${LAYOUT_DIR}
-    cp -Rf ./Misc/layoutbin/* ${LAYOUT_DIR}/bin
-    
-    #change execution flag to allow running with sudo
-    if [[ "$PLATFORM" == 'linux' ]]; then
-        chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
-        chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
-    fi
+    dotnet msbuild "//NoLogo" "//t:Layout" "//p:BUILDCONFIG=${BUILD_CONFIG};PackageRuntime=${runtime_id}" || failed "create agent layout"
 
-    # clean up files not meant for platform
-    if [[ ("$PLATFORM_NAME" == "Linux") || ("$PLATFORM_NAME" == "Darwin") ]]; then
-        rm ${LAYOUT_DIR}/*.cmd
-    else
-        rm ${LAYOUT_DIR}/*.sh
-    fi
+    dotnet msbuild "//NoLogo" "//t:Externals" || failed "get external tools"
+
+    # restore
+    # build
+    # publish
     
-    heading Externals ...
-    bash ./Misc/externals.sh || checkRC externals.sh
+    # heading Layout ...
+    # rm -Rf ${LAYOUT_DIR}
+    # mkdir -p ${LAYOUT_DIR}/bin
+    # for bin_copy_dir in ${bin_layout_dirs[@]}
+    # do
+    #     copyBin ${bin_copy_dir}
+    # done
+
+    # if [[ "$define_os" == 'OS_WINDOWS' ]]; then
+    #     # TODO Make sure to package Release build instead of debug build
+    #     echo Copying Agent.Service
+    #     cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
+    # fi
+    
+    # cp -Rf ./Misc/layoutroot/* ${LAYOUT_DIR}
+    # cp -Rf ./Misc/layoutbin/* ${LAYOUT_DIR}/bin
+    
+    # #change execution flag to allow running with sudo
+    # if [[ "$PLATFORM" == 'linux' ]]; then
+    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
+    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
+    # fi
+
+    # # clean up files not meant for platform
+    # if [[ ("$PLATFORM_NAME" == "Linux") || ("$PLATFORM_NAME" == "Darwin") ]]; then
+    #     rm ${LAYOUT_DIR}/*.cmd
+    # else
+    #     rm ${LAYOUT_DIR}/*.sh
+    # fi
+    
+    # heading Externals ...
+    # bash ./Misc/externals.sh || checkRC externals.sh
 }
 
 function update ()
@@ -262,12 +267,8 @@ function runtest ()
     if [[ ("$PLATFORM" == "linux") || ("$PLATFORM" == "darwin") ]]; then
         ulimit -n 1024
     fi
-
-    heading Testing ...
-    pushd Test> /dev/null    
-    export VSTS_AGENT_SRC_DIR=${SCRIPT_DIR}
-    dotnet test --no-build --logger:trx || failed "failed tests"
-    popd > /dev/null    
+    
+    dotnet msbuild "//NoLogo" "//t:Test" "//p:BUILDCONFIG=${BUILD_CONFIG};PackageRuntime=${runtime_id}" || failed "dotnet test"
 }
 
 function validate ()
@@ -363,27 +364,18 @@ heading "Dotnet SDK Version"
 dotnet --version
 
 case $DEV_CMD in
-   "build") build;;
-   "b") build;;
    "test") runtest;;
    "t") runtest;;
-   "bt") buildtest;;   
-   "clean") clean;;
-   "c") clean;;
-   "restore") restore;;
-   "r") restore;;
    "layout") layout;;
    "l") layout;;
    "update") update;;
    "u") update;;
    "package") package;;
    "p") package;;
-   "validate") validate;;
-   "v") validate;;
-   *) echo "Invalid cmd.  Use build, restore, clean, test, or layout";;
+   *) echo "Invalid cmd.  Use layout, runtest, update or package";;
 esac
 
-popd
+popd > /dev/null
 echo
 echo Done.
 echo
