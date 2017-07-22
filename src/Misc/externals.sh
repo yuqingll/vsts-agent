@@ -1,4 +1,5 @@
 #!/bin/bash
+PLATFORM_CMD=$1
 CONTAINER_URL=https://vstsagenttools.blob.core.windows.net/tools
 NODE_URL=https://nodejs.org/dist
 NODE_VERSION="6.10.3"
@@ -13,25 +14,18 @@ LAYOUT_DIR=$(get_abs_path `dirname $0`/../../_layout)
 DOWNLOAD_DIR=$(get_abs_path `dirname $0`/../../_downloads)
 
 function get_current_os_name() {
+    if [[ "$PLATFORM_CMD" != "" ]]; then
+        echo "$PLATFORM_CMD"
+        return 0
+    fi
+
     local uname=$(uname)
     if [ "$uname" = "Darwin" ]; then
         echo "darwin"
         return 0
     else
-        # Detect Distro
-        if [ "$(cat /etc/*-release 2>/dev/null | grep -cim1 ubuntu)" -eq 1 ]; then
-            echo "ubuntu"
-            return 0
-        elif [ "$(cat /etc/*-release 2>/dev/null | grep -cim1 centos)" -eq 1 ]; then
-            echo "centos"
-            return 0
-        elif [ "$(cat /etc/*-release 2>/dev/null | grep -cim1 rhel)" -eq 1 ]; then
-            echo "rhel"
-            return 0
-        elif [ "$(cat /etc/*-release 2>/dev/null | grep -cim1 debian)" -eq 1 ]; then
-            echo "debian"
-            return 0
-        fi
+        echo "linux"
+        return 0
     fi
     
     echo "windows"
@@ -154,13 +148,13 @@ if [[ "$PLATFORM" == "darwin" ]]; then
 fi
 
 # Download the external tools common across OSX and Linux platforms.
-if [[ "$PLATFORM" == "ubuntu" || "$PLATFORM" == "debian" || "$PLATFORM" == "rhel" || "$PLATFORM" == "centos" || "$PLATFORM" == "darwin" ]]; then
+if [[ "$PLATFORM" == "linux" || "$PLATFORM" == "darwin" ]]; then
     acquireExternalTool "$CONTAINER_URL/tee/14_0_4_20160606/TEE-CLC-14.0.4.zip" tee fix_nested_dir
     acquireExternalTool "$CONTAINER_URL/vso-task-lib/0.5.5/vso-task-lib.tar.gz" vso-task-lib
 fi
 
 # Download the external tools common across Linux platforms (excluding OSX).
-if [[ "$PLATFORM" == "ubuntu" || "$PLATFORM" == "debian" || "$PLATFORM" == "rhel" || "$PLATFORM" == "centos" ]]; then
+if [[ "$PLATFORM" == "linux" ]]; then
     acquireExternalTool "$NODE_URL/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" node fix_nested_dir
     acquireExternalTool "$NODE_URL/v${NODE_OLD_VERSION}/node-v${NODE_OLD_VERSION}-linux-x64.tar.gz" node-${NODE_OLD_VERSION} fix_nested_dir
 fi

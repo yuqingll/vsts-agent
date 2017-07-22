@@ -18,7 +18,7 @@ fi
 PLATFORM_NAME=`uname`
 PLATFORM="windows"
 if [[ ("$PLATFORM_NAME" == "Linux") || ("$PLATFORM_NAME" == "Darwin") ]]; then
-   PLATFORM=`echo "${PLATFORM_NAME}" | awk '{print tolower($0)}'`
+    PLATFORM=`echo "${PLATFORM_NAME}" | awk '{print tolower($0)}'`
 fi
 
 # allow for #if defs in code
@@ -49,8 +49,8 @@ elif [[ "$PLATFORM" == 'darwin' ]]; then
    runtime_id='osx.10.11-x64'
 fi
 
-build_dirs=("Microsoft.VisualStudio.Services.Agent" "Agent.Listener" "Agent.Worker" "Test")
-build_clean_dirs=("Agent.Listener" "Test" "Agent.Worker" "Microsoft.VisualStudio.Services.Agent")
+build_dirs=("Microsoft.VisualStudio.Services.Agent" "Agent.Listener" "Agent.Worker")
+build_clean_dirs=("Agent.Listener" "Agent.Worker" "Microsoft.VisualStudio.Services.Agent")
 bin_layout_dirs=("Agent.Listener" "Microsoft.VisualStudio.Services.Agent" "Agent.Worker")
 WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
 WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/Debug"
@@ -69,13 +69,6 @@ function warn()
    echo "WARNING - FAILED: $error" >&2
 }
 
-function checkRC() {
-    local rc=$?
-    if [ $rc -ne 0 ]; then
-        failed "${1} Failed with return code $rc"
-    fi
-}
-
 function heading()
 {
     echo
@@ -85,68 +78,11 @@ function heading()
     echo -----------------------------------------
 }
 
-function rundotnet ()
-{
-    dotnet_cmd=${1}
-    err_handle=${2:-failed}
-
-    if [[ ( "${!3}" == "" ) ]]; then
-        run_dirs=("${3}")
-    else 
-        run_dirs=("${!3}")
-    fi
-
-    heading ${1} ...
-
-    cfg_args=""
-    msbuild_args=""
-    runtime_args=""
-    if [[ ("$dotnet_cmd" == "build") ]]; then
-        cfg_args="-c ${BUILD_CONFIG}"
-        if [[ "$define_os" == 'OS_WINDOWS' ]]; then
-            msbuild_args="//p:OSConstant=${define_os}"
-        else
-            msbuild_args="/p:OSConstant=${define_os}"
-        fi    
-    fi
-
-    if [[ ("$dotnet_cmd" == "publish") ]]; then
-        cfg_args="-c ${BUILD_CONFIG}"
-        runtime_args="--runtime ${runtime_id}"        
-        if [[ "$define_os" == 'OS_WINDOWS' ]]; then
-            msbuild_args="//p:OSConstant=${define_os}"
-        else
-            msbuild_args="/p:OSConstant=${define_os}"
-        fi    
-    fi
-
-    echo "${cfg_args}"
-    echo "${msbuild_args}"
-    echo "${runtime_args}"
-
-    for dir_name in ${run_dirs[@]}
-    do
-        echo
-        echo -- Running: dotnet $dotnet_cmd $dir_name --
-        echo
-        dotnet ${dotnet_cmd} $runtime_args $dir_name $cfg_args $msbuild_args|| ${err_handle} "${dotnet_cmd} $dir_name"
-    done   
-}
-
-function generateConstant()
-{
-    commit_token="_COMMIT_HASH_"
-    package_token="_PACKAGE_NAME_"
-    commit_hash=`git rev-parse HEAD` || failed "git commit hash"
-    echo "Building ${commit_hash} --- ${runtime_id}"
-    sed -e "s/$commit_token/$commit_hash/g" -e "s/$package_token/$runtime_id/g" "Misc/BuildConstants.ch" > "Microsoft.VisualStudio.Services.Agent/BuildConstants.cs"
-}
-
 function build ()
 {
-    generateConstant
+    dotnet msbuild //t:Build //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
     
-    if [[ "$define_os" == 'OS_WINDOWS' ]]; then
+    if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
         reg_out=`reg query "HKLM\SOFTWARE\Microsoft\MSBuild\ToolsVersions\4.0" -v MSBuildToolsPath`
         msbuild_location=`echo $reg_out | tr -d '\r\n' | tr -s ' ' | cut -d' ' -f5 | tr -d '\r\n'`
               
@@ -156,105 +92,52 @@ function build ()
         fi
     fi
 
-    rundotnet build failed build_dirs[@]
-
     if [[ "$define_os" == 'OS_WINDOWS' && "$msbuild_location" != "" ]]; then
         $msbuild_location/msbuild.exe $WINDOWSAGENTSERVICE_PROJFILE || failed "msbuild AgentService.csproj"
     fi
 }
 
-function restore ()
-{
-    rundotnet restore warn build_dirs[@]
-}
-
-function clean ()
-{
-    heading Cleaning ...
-    for dir_name in ${build_clean_dirs[@]}
-    do
-        echo Cleaning ${dir_name} ...
-        rm -rf `dirname ${0}`/${dir_name}/bin
-        rm -rf `dirname ${0}`/${dir_name}/obj
-    done
-}
-
-function publish ()
-{
-    rundotnet publish failed bin_layout_dirs[@]
-}
-
-function copyBin ()
-{
-    echo Copying ${1}
-    pushd ${1}/bin/${BUILD_CONFIG}/netcoreapp1.1 > /dev/null
-
-    source_dir=$(ls -d */)publish/
-    if [ ! -d "$source_dir" ]; then
-        failed "Publish folder is missing. Please ensure you use the correct .NET Core tools (see readme for instructions)"
-    fi
-
-    cp -Rf ${source_dir}* ${LAYOUT_DIR}/bin
-    popd > /dev/null 
-}
-
 function layout ()
 {
-    clean
-    restore
-    build
-    publish
-    
-    heading Layout ...
-    rm -Rf ${LAYOUT_DIR}
-    mkdir -p ${LAYOUT_DIR}/bin
-    for bin_copy_dir in ${bin_layout_dirs[@]}
-    do
-        copyBin ${bin_copy_dir}
-    done
+    # # clean
+    # dotnet msbuild //t:Clean || warn clean
 
-    if [[ "$define_os" == 'OS_WINDOWS' ]]; then
-        # TODO Make sure to package Release build instead of debug build
-        echo Copying Agent.Service
-        cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
-    fi
+    # layout
+    dotnet msbuild //t:Build //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    # publish
     
-    cp -Rf ./Misc/layoutroot/* ${LAYOUT_DIR}
-    cp -Rf ./Misc/layoutbin/* ${LAYOUT_DIR}/bin
-    
-    #change execution flag to allow running with sudo
-    if [[ "$PLATFORM" == 'linux' ]]; then
-        chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
-        chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
-    fi
+    # heading Layout ...
+    # rm -Rf ${LAYOUT_DIR}
+    # mkdir -p ${LAYOUT_DIR}/bin
+    # for bin_copy_dir in ${bin_layout_dirs[@]}
+    # do
+    #     copyBin ${bin_copy_dir}
+    # done
 
-    # clean up files not meant for platform
-    if [[ ("$PLATFORM_NAME" == "Linux") || ("$PLATFORM_NAME" == "Darwin") ]]; then
-        rm ${LAYOUT_DIR}/*.cmd
-    else
-        rm ${LAYOUT_DIR}/*.sh
-    fi
+    # if [[ "$define_os" == 'OS_WINDOWS' ]]; then
+    #     # TODO Make sure to package Release build instead of debug build
+    #     echo Copying Agent.Service
+    #     cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
+    # fi
+    
+    # cp -Rf ./Misc/layoutroot/* ${LAYOUT_DIR}
+    # cp -Rf ./Misc/layoutbin/* ${LAYOUT_DIR}/bin
+    
+    # #change execution flag to allow running with sudo
+    # if [[ "$PLATFORM" == 'linux' ]]; then
+    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
+    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
+    # fi
+
+    # # clean up files not meant for platform
+    # if [[ ("$PLATFORM" == 'linux') || ("$PLATFORM" == 'darwin') ]]; then
+    #     rm ${LAYOUT_DIR}/*.cmd
+    # else
+    #     rm ${LAYOUT_DIR}/*.sh
+    # fi
     
     heading Externals ...
-    bash ./Misc/externals.sh || checkRC externals.sh
-}
-
-function update ()
-{
-    if [[ "$DEV_SUBCMD" != '' ]]; then
-        update_dirs=(${DEV_SUBCMD})
-    else
-        update_dirs=${bin_layout_dirs[@]}
-    fi
-
-    for update_dir in ${update_dirs[@]}
-    do
-        echo Updating ${update_dir}
-        rundotnet build failed ${update_dir}
-        echo Publishing ${update_dir}
-        rundotnet publish failed ${update_dir}
-        copyBin ${update_dir}
-    done
+    bash ./Misc/externals.sh $PLATFORM || checkRC externals.sh
 }
 
 function runtest ()
@@ -268,21 +151,6 @@ function runtest ()
     export VSTS_AGENT_SRC_DIR=${SCRIPT_DIR}
     dotnet test --no-build --logger:trx || failed "failed tests"
     popd > /dev/null    
-}
-
-function validate ()
-{
-    echo git clean ...
-    git clean -fdx || failed "git clean"
-
-    layout
-    runtest
-}
-
-function buildtest ()
-{
-    build
-    runtest
 }
 
 function package ()
@@ -367,19 +235,12 @@ case $DEV_CMD in
    "b") build;;
    "test") runtest;;
    "t") runtest;;
-   "bt") buildtest;;   
    "clean") clean;;
    "c") clean;;
-   "restore") restore;;
-   "r") restore;;
    "layout") layout;;
    "l") layout;;
-   "update") update;;
-   "u") update;;
    "package") package;;
    "p") package;;
-   "validate") validate;;
-   "v") validate;;
    *) echo "Invalid cmd.  Use build, restore, clean, test, or layout";;
 esac
 
