@@ -175,13 +175,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                         taskStep.ExecutionContext = jobContext.CreateChild(Guid.NewGuid(), StringUtil.Loc("PreJob", taskStep.DisplayName), taskStep.TaskInstance.RefName, taskVariablesMapping[taskStep.TaskInstance.InstanceId]);
                     }
 
-#if !OS_WINDOWS
                     if (!string.IsNullOrEmpty(jobContext.Container.ContainerImage))
                     {
                         var containerProvider = HostContext.GetService<IContainerOperationProvider>();
                         initResult.PreJobSteps.Insert(0, containerProvider.GetContainerStartStep(jobContext));
                     }
-#endif
+
                     // Add pre-job step from Extension
                     Trace.Info("Adding pre-job step from extension.");
                     var extensionPreJobStep = GetExtensionPreJobStep(jobContext);
@@ -221,13 +220,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                         initResult.PostJobStep.Add(extensionPostJobStep);
                     }
 
-#if !OS_WINDOWS
                     if (!string.IsNullOrEmpty(jobContext.Container.ContainerImage))
                     {
                         var containerProvider = HostContext.GetService<IContainerOperationProvider>();
                         initResult.PostJobStep.Add(containerProvider.GetContainerStopStep(jobContext));
                     }
-#endif
 
 #if OS_WINDOWS
                     // Add script post steps.
