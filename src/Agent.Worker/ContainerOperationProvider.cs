@@ -260,11 +260,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // we need cd to the workingDir then run the executable with args.
-            // bash -c "cd \"workingDirectory\"; \"filePath\" \"arguments\""
-            string workingDirectoryEscaped = StringUtil.Format(@"\""{0}\""", workingDirectory.Replace(@"""", @"\\\"""));
-            string filePathEscaped = StringUtil.Format(@"\""{0}\""", filePath.Replace(@"""", @"\\\"""));
+            // cmd /c "cd \"workingDirectory\" && \"filePath\" \"arguments\""
+            string workingDirectoryEscaped = StringUtil.Format(@"\""{0}\""", workingDirectory);
+            string filePathEscaped = StringUtil.Format(@"\""{0}\""", filePath);
             string argumentsEscaped = arguments.Replace(@"\", @"\\").Replace(@"""", @"\""");
-            string bashCommandLine = $"bash -c \"cd {workingDirectoryEscaped}&{filePathEscaped} {argumentsEscaped}\"";
+            string bashCommandLine = $"%ComSpec% /c \"cd {workingDirectoryEscaped} && {filePathEscaped} {argumentsEscaped}\"";
 
             arguments = $"exec -u {executionContext.Container.CurrentUserId} {envOptions} {executionContext.Container.ContainerId} {bashCommandLine}";
 
@@ -300,30 +300,32 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // Mount folder into container
-            executionContext.Container.MountVolumes.Add(new MountVolume(Path.GetDirectoryName(executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))));
-            executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_TempDirectory));
-            executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_ToolsDirectory));
+            executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Work)));
+            // executionContext.Container.MountVolumes.Add(new MountVolume(Path.GetDirectoryName(executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))));
+            // executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_TempDirectory));
+            // executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_ToolsDirectory));
             executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Externals), true));
             executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Tasks), true));
 
             // Ensure .taskkey file exist so we can mount it.
-            string taskKeyFile = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), ".taskkey");
-            if (!File.Exists(taskKeyFile))
-            {
-                File.WriteAllText(taskKeyFile, string.Empty);
-            }
-            executionContext.Container.MountVolumes.Add(new MountVolume(taskKeyFile));
+            // Bug: https://github.com/opctl/opctl/issues/207
+            // string taskKeyFile = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), ".taskkey");
+            // if (!File.Exists(taskKeyFile))
+            // {
+            //     File.WriteAllText(taskKeyFile, string.Empty);
+            // }
+            // executionContext.Container.MountVolumes.Add(new MountVolume(taskKeyFile));
 
             executionContext.Container.ContainerId = await _dockerManger.DockerCreate(executionContext, executionContext.Container.ContainerImage, executionContext.Container.MountVolumes);
             ArgUtil.NotNullOrEmpty(executionContext.Container.ContainerId, nameof(executionContext.Container.ContainerId));
 
             // Get current username
-            executionContext.Container.CurrentUserName = (await ExecuteCommandAsync(executionContext, "whoami", string.Empty)).FirstOrDefault();
-            ArgUtil.NotNullOrEmpty(executionContext.Container.CurrentUserName, nameof(executionContext.Container.CurrentUserName));
+            // executionContext.Container.CurrentUserName = (await ExecuteCommandAsync(executionContext, "whoami", string.Empty)).FirstOrDefault();
+            // ArgUtil.NotNullOrEmpty(executionContext.Container.CurrentUserName, nameof(executionContext.Container.CurrentUserName));
 
             // Get current userId
-            executionContext.Container.CurrentUserId = (await ExecuteCommandAsync(executionContext, "id", $"-u {executionContext.Container.CurrentUserName}")).FirstOrDefault();
-            ArgUtil.NotNullOrEmpty(executionContext.Container.CurrentUserId, nameof(executionContext.Container.CurrentUserId));
+            // executionContext.Container.CurrentUserId = (await ExecuteCommandAsync(executionContext, "id", $"-u {executionContext.Container.CurrentUserName}")).FirstOrDefault();
+            // ArgUtil.NotNullOrEmpty(executionContext.Container.CurrentUserId, nameof(executionContext.Container.CurrentUserId));
 
             int startExitCode = await _dockerManger.DockerStart(executionContext, executionContext.Container.ContainerId);
             if (startExitCode != 0)
@@ -332,7 +334,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // Ensure bash exist in the image
-            int execWhichBashExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"which bash");
+            int execWhichBashExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"\"%ComSpec%\" /c echo ComSpec");
             if (execWhichBashExitCode != 0)
             {
                 throw new InvalidOperationException($"Docker exec fail with exit code {execWhichBashExitCode}");
@@ -342,11 +344,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             // All command execute in docker will run as Root by default, 
             // this will cause the agent on the host machine doesn't have permission to any new file/folder created inside the container.
             // So, we create a user account with same UID inside the container and let all docker exec command run as that user.
-            int execUseraddExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"useradd -m -o -u {executionContext.Container.CurrentUserId} {executionContext.Container.CurrentUserName}_VSTSContainer");
-            if (execUseraddExitCode != 0)
-            {
-                throw new InvalidOperationException($"Docker exec fail with exit code {execUseraddExitCode}");
-            }
+            // int execUseraddExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"useradd -m -o -u {executionContext.Container.CurrentUserId} {executionContext.Container.CurrentUserName}_VSTSContainer");
+            // if (execUseraddExitCode != 0)
+            // {
+            //     throw new InvalidOperationException($"Docker exec fail with exit code {execUseraddExitCode}");
+            // }
         }
 
         private async Task StopContainerAsync(IExecutionContext executionContext)
