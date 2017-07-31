@@ -260,13 +260,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // we need cd to the workingDir then run the executable with args.
-            // cmd /c "cd \"workingDirectory\" && \"filePath\" \"arguments\""
-            string workingDirectoryEscaped = StringUtil.Format(@"\""{0}\""", workingDirectory);
-            string filePathEscaped = StringUtil.Format(@"\""{0}\""", filePath);
-            string argumentsEscaped = arguments.Replace(@"\", @"\\").Replace(@"""", @"\""");
-            string bashCommandLine = $"%ComSpec% /c \"cd {workingDirectoryEscaped} && {filePathEscaped} {argumentsEscaped}\"";
+            // cmd /c "cd "workingDirectory" && "filePath" "arguments""
+            string workingDirectoryEscaped = StringUtil.Format(@"""{0}""", workingDirectory);
+            string filePathEscaped = StringUtil.Format(@"""{0}""", filePath);
+            string argumentsEscaped = arguments;
+            string bashCommandLine = $"CMD /c \"cd {workingDirectoryEscaped} && {filePathEscaped} {argumentsEscaped}\"";
 
-            arguments = $"exec -u {executionContext.Container.CurrentUserId} {envOptions} {executionContext.Container.ContainerId} {bashCommandLine}";
+            arguments = $"exec {envOptions} {executionContext.Container.ContainerId} {bashCommandLine}";
 
             containerEnginePath = _dockerManger.DockerPath;
             containerExecutionArgs = arguments;
@@ -300,12 +300,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // Mount folder into container
-            executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Work)));
+            // executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Work)));
             // executionContext.Container.MountVolumes.Add(new MountVolume(Path.GetDirectoryName(executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))));
-            // executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_TempDirectory));
-            // executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_ToolsDirectory));
-            executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Externals), true));
-            executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Tasks), true));
+            executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_TempDirectory));
+            executionContext.Container.MountVolumes.Add(new MountVolume(executionContext.Variables.Agent_ToolsDirectory));
+            executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Externals)));
+            // executionContext.Container.MountVolumes.Add(new MountVolume(HostContext.GetDirectory(WellKnownDirectory.Tasks), true));
 
             // Ensure .taskkey file exist so we can mount it.
             // Bug: https://github.com/opctl/opctl/issues/207
@@ -333,13 +333,24 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 throw new InvalidOperationException($"Docker start fail with exit code {startExitCode}");
             }
 
-            // Ensure bash exist in the image
-            int execWhichBashExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"\"%ComSpec%\" /c echo ComSpec");
-            if (execWhichBashExitCode != 0)
+            // Ensure _work dir exist in the image
+            // int execWhichBashExitCode = await _dockerManger.DockerExec(executionContext, executionContext.Container.ContainerId, string.Empty, $"cmd /c mkdir \"{HostContext.GetDirectory(WellKnownDirectory.Work)}\"");
+            // if (execWhichBashExitCode != 0)
+            // {
+            //     throw new InvalidOperationException($"Docker exec fail with exit code {execWhichBashExitCode}");
+            // }
+
+            int cpWorkDirExitCode = await _dockerManger.DockerCopy(executionContext, executionContext.Container.ContainerId, Path.GetDirectoryName(executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), true);
+            if (cpWorkDirExitCode != 0)
             {
-                throw new InvalidOperationException($"Docker exec fail with exit code {execWhichBashExitCode}");
+                throw new InvalidOperationException($"Docker cp fail with exit code {cpWorkDirExitCode}");
             }
 
+            int cpTaskExitCode = await _dockerManger.DockerCopy(executionContext, executionContext.Container.ContainerId, HostContext.GetDirectory(WellKnownDirectory.Tasks), true);
+            if (cpTaskExitCode != 0)
+            {
+                throw new InvalidOperationException($"Docker cp fail with exit code {cpTaskExitCode}");
+            }
             // Create an user with same uid as the agent run as user inside the container.
             // All command execute in docker will run as Root by default, 
             // this will cause the agent on the host machine doesn't have permission to any new file/folder created inside the container.
@@ -358,6 +369,27 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             if (!string.IsNullOrEmpty(executionContext.Container.ContainerId))
             {
+                string workDir = executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string workDirBk = $"{executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}_bk";
+                executionContext.Debug($"Rename {workDir} -> {workDirBk}");
+                Directory.Move(workDir, workDirBk);
+
+                executionContext.Output($"Copy System.DefaultWorkingDirectory back from container: {executionContext.Container.ContainerName}");
+                int cpWorkDirExitCode = await _dockerManger.DockerCopy(executionContext, executionContext.Container.ContainerId, executionContext.Variables.System_DefaultWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), false);
+                if (cpWorkDirExitCode != 0)
+                {
+                    executionContext.Debug($"Delete {workDir}");
+                    IOUtil.DeleteDirectory(workDir, false, true, CancellationToken.None);
+                    executionContext.Debug($"Rename {workDirBk} -> {workDir}");
+                    Directory.Move(workDirBk, workDir);
+                    throw new InvalidOperationException($"Docker cp fail with exit code {cpWorkDirExitCode}");
+                }
+                else
+                {
+                    executionContext.Debug($"Delete {workDirBk}");
+                    IOUtil.DeleteDirectory(workDirBk, false, true, CancellationToken.None);
+                }
+
                 executionContext.Output($"Stop container: {executionContext.Container.ContainerName}");
 
                 int stopExitCode = await _dockerManger.DockerStop(executionContext, executionContext.Container.ContainerId);

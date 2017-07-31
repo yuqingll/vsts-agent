@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -16,6 +17,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Container
         Task<int> DockerPull(IExecutionContext context, string image);
         Task<string> DockerCreate(IExecutionContext context, string image, List<MountVolume> mountVolumes);
         Task<int> DockerStart(IExecutionContext context, string containerId);
+        Task<int> DockerCopy(IExecutionContext context, string containerId, string localPath, bool copyDirection);
         Task<int> DockerStop(IExecutionContext context, string containerId);
         Task<int> DockerExec(IExecutionContext context, string containerId, string options, string command);
     }
@@ -73,6 +75,23 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Container
             return await ExecuteDockerCommandAsync(context, "pull", image, context.CancellationToken);
         }
 
+        public async Task<int> DockerCopy(IExecutionContext context, string containerId, string localPath, bool copyDirection)
+        {
+            string dockerCopyArgs;
+
+            // from host to container
+            if (copyDirection)
+            {
+                dockerCopyArgs = $"\"{localPath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}\" {containerId}:\"{localPath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}\"";
+            }
+            else
+            {
+                dockerCopyArgs = $"{containerId}:\"{localPath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}\" \"{localPath.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}\"";
+            }
+            
+            return await ExecuteDockerCommandAsync(context, "cp", dockerCopyArgs, context.CancellationToken);
+        }
+
         public async Task<string> DockerCreate(IExecutionContext context, string image, List<MountVolume> mountVolumes)
         {
             string dockerMountVolumesArgs = string.Empty;
@@ -95,7 +114,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Container
             string dockerCommand = "sleep 999d";
 #else
             string dockerSockMount = string.Empty;
-            string dockerCommand = "timeout /t -1";
+            string dockerCommand = "ping -t localhost";
 #endif
 
             string dockerArgs = $"--name {context.Container.ContainerName} --rm {dockerSockMount} {dockerMountVolumesArgs} {image} {dockerCommand}";
