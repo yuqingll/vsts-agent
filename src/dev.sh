@@ -99,43 +99,21 @@ function build ()
 
 function layout ()
 {
-    # # clean
-    # dotnet msbuild //t:Clean || warn clean
-
     # layout
-    dotnet msbuild //t:Build //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
-    # publish
-    
-    # heading Layout ...
-    # rm -Rf ${LAYOUT_DIR}
-    # mkdir -p ${LAYOUT_DIR}/bin
-    # for bin_copy_dir in ${bin_layout_dirs[@]}
-    # do
-    #     copyBin ${bin_copy_dir}
-    # done
+    dotnet msbuild //t:layout //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
     # if [[ "$define_os" == 'OS_WINDOWS' ]]; then
     #     # TODO Make sure to package Release build instead of debug build
     #     echo Copying Agent.Service
     #     cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
     # fi
-    
-    # cp -Rf ./Misc/layoutroot/* ${LAYOUT_DIR}
-    # cp -Rf ./Misc/layoutbin/* ${LAYOUT_DIR}/bin
-    
-    # #change execution flag to allow running with sudo
-    # if [[ "$PLATFORM" == 'linux' ]]; then
-    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
-    #     chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
-    # fi
 
-    # # clean up files not meant for platform
-    # if [[ ("$PLATFORM" == 'linux') || ("$PLATFORM" == 'darwin') ]]; then
-    #     rm ${LAYOUT_DIR}/*.cmd
-    # else
-    #     rm ${LAYOUT_DIR}/*.sh
-    # fi
-    
+    #change execution flag to allow running with sudo
+    if [[ "$PLATFORM" == 'linux' ]]; then
+        chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
+        chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
+    fi
+
     heading Externals ...
     bash ./Misc/externals.sh $PLATFORM || checkRC externals.sh
 }
@@ -147,10 +125,8 @@ function runtest ()
     fi
 
     heading Testing ...
-    pushd Test> /dev/null    
     export VSTS_AGENT_SRC_DIR=${SCRIPT_DIR}
-    dotnet test --no-build --logger:trx || failed "failed tests"
-    popd > /dev/null    
+    dotnet msbuild //t:test //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed "failed tests" 
 }
 
 function package ()
@@ -235,13 +211,11 @@ case $DEV_CMD in
    "b") build;;
    "test") runtest;;
    "t") runtest;;
-   "clean") clean;;
-   "c") clean;;
    "layout") layout;;
    "l") layout;;
    "package") package;;
    "p") package;;
-   *) echo "Invalid cmd.  Use build, restore, clean, test, or layout";;
+   *) echo "Invalid cmd.  Use build, test, or layout";;
 esac
 
 popd
