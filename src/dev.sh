@@ -1,6 +1,14 @@
 #!/bin/bash
+
+###############################################################################
+#  
+#  ./dev.sh build/layout/test/package [Debug/Release]
+#
+###############################################################################
+
 DEV_CMD=$1
-DEV_SUBCMD=$2
+DEV_CONFIG=$2
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAYOUT_DIR="$SCRIPT_DIR/../_layout"
 DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads"
@@ -11,7 +19,7 @@ DOTNETSDK_INSTALLDIR="$DOTNETSDK_ROOT/$DOTNETSDK_VERSION"
 pushd $SCRIPT_DIR
 
 BUILD_CONFIG="Debug"
-if [[ "$DEV_SUBCMD" == "Release" ]]; then
+if [[ "$DEV_CONFIG" == "Release" ]]; then
     BUILD_CONFIG="Release"
 fi
 
@@ -23,35 +31,15 @@ fi
 
 # allow for #if defs in code
 define_os='OS_WINDOWS'
-runtime_id='win7-x64'
+runtime_id='win-x64'
 if [[ "$PLATFORM" == 'linux' ]]; then
    define_os='OS_LINUX'
-   if [ -e /etc/os-release ]; then
-        . /etc/os-release
-        case "$ID.$VERSION_ID" in
-            "centos.7")
-                runtime_id='centos.7-x64';;
-            "rhel.7.2")
-                runtime_id='rhel.7.2-x64';;
-            "ubuntu.14.04")
-                runtime_id='ubuntu.14.04-x64';;
-            "ubuntu.16.04")
-                runtime_id='ubuntu.16.04-x64';;
-        esac
-        if [[ ("$runtime_id" == "win7-x64") ]]; then
-            failed "Can not determine runtime identifier from '$ID.$VERSION_ID'"
-        fi
-    else
-        failed "Can not read os information from /etc/os-release"
-    fi
+   runtime_id='linux-x64'
 elif [[ "$PLATFORM" == 'darwin' ]]; then
    define_os='OS_OSX'
-   runtime_id='osx.10.11-x64'
+   runtime_id='osx-x64'
 fi
 
-build_dirs=("Microsoft.VisualStudio.Services.Agent" "Agent.Listener" "Agent.Worker")
-build_clean_dirs=("Agent.Listener" "Agent.Worker" "Microsoft.VisualStudio.Services.Agent")
-bin_layout_dirs=("Agent.Listener" "Microsoft.VisualStudio.Services.Agent" "Agent.Worker")
 WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
 WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/Debug"
 
