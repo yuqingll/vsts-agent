@@ -1,5 +1,14 @@
 #!/bin/bash
-PLATFORM_CMD=$1
+PLATFORM=$1
+PRECACHE=$2
+
+case $PLATFORM in
+   "windows") echo "Prepare external resources for Windows platform";;
+   "linux") echo "Prepare external resources for Linux platform";;
+   "osx") echo "Prepare external resources for OSX platform";;
+   *) echo "Invalid PLATFORM: $PLATFORM.  Use windows, linux, or osx" & exit 1;;
+esac
+
 CONTAINER_URL=https://vstsagenttools.blob.core.windows.net/tools
 NODE_URL=https://nodejs.org/dist
 NODE_VERSION="6.10.3"
@@ -12,27 +21,6 @@ get_abs_path() {
 
 LAYOUT_DIR=$(get_abs_path `dirname $0`/../../_layout)
 DOWNLOAD_DIR=$(get_abs_path `dirname $0`/../../_downloads)
-
-function get_current_os_name() {
-    if [[ "$PLATFORM_CMD" != "" ]]; then
-        echo "$PLATFORM_CMD"
-        return 0
-    fi
-
-    local uname=$(uname)
-    if [ "$uname" = "Darwin" ]; then
-        echo "darwin"
-        return 0
-    else
-        echo "linux"
-        return 0
-    fi
-    
-    echo "windows"
-    return 0
-}
-
-PLATFORM=$(get_current_os_name)
 
 function failed() {
    local error=${1:-Undefined error}
@@ -83,6 +71,12 @@ function acquireExternalTool() {
 
         # Move the partial file to the download target.
         mv "$partial_target" "$download_target" || checkRC 'mv'
+    fi
+
+    # Stop when we only need to pre-cache to _download
+    if [[ "$PRECACHE" != "" ]]; then
+        echo "Cached $2"
+        return 0
     fi
 
     # Extract to layout.

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAYOUT_DIR="$SCRIPT_DIR/../_layout"
 DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads"
 DOTNETSDK_ROOT="$SCRIPT_DIR/../_dotnetsdk"
-DOTNETSDK_VERSION="1.0.1"
+DOTNETSDK_VERSION="2.0.0"
 DOTNETSDK_INSTALLDIR="$DOTNETSDK_ROOT/$DOTNETSDK_VERSION"
 
 pushd $SCRIPT_DIR
@@ -23,19 +23,18 @@ if [[ "$DEV_CONFIG" == "Release" ]]; then
     BUILD_CONFIG="Release"
 fi
 
-PLATFORM_NAME=`uname`
-PLATFORM="windows"
-if [[ ("$PLATFORM_NAME" == "Linux") || ("$PLATFORM_NAME" == "Darwin") ]]; then
-    PLATFORM=`echo "${PLATFORM_NAME}" | awk '{print tolower($0)}'`
+CURRENT_PLATFORM="windows"
+if [[ (`uname` == "Linux") || (`uname` == "Darwin") ]]; then
+    CURRENT_PLATFORM=`echo \`uname\` | awk '{print tolower($0)}'`
 fi
 
 # allow for #if defs in code
 define_os='OS_WINDOWS'
 runtime_id='win-x64'
-if [[ "$PLATFORM" == 'linux' ]]; then
+if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
    define_os='OS_LINUX'
    runtime_id='linux-x64'
-elif [[ "$PLATFORM" == 'darwin' ]]; then
+elif [[ "$CURRENT_PLATFORM" == 'darwin' ]]; then
    define_os='OS_OSX'
    runtime_id='osx-x64'
 fi
@@ -55,6 +54,13 @@ function warn()
 {
    local error=${1:-Undefined error}
    echo "WARNING - FAILED: $error" >&2
+}
+
+function checkRC() {
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+        failed "${1} Failed with return code $rc"
+    fi
 }
 
 function heading()
@@ -97,18 +103,18 @@ function layout ()
     # fi
 
     #change execution flag to allow running with sudo
-    if [[ "$PLATFORM" == 'linux' ]]; then
+    if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
         chmod +x ${LAYOUT_DIR}/bin/Agent.Listener
         chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
     fi
 
     heading Externals ...
-    bash ./Misc/externals.sh $PLATFORM || checkRC externals.sh
+    bash ./Misc/externals.sh $CURRENT_PLATFORM || checkRC externals.sh
 }
 
 function runtest ()
 {
-    if [[ ("$PLATFORM" == "linux") || ("$PLATFORM" == "darwin") ]]; then
+    if [[ ("$CURRENT_PLATFORM" == "linux") || ("$CURRENT_PLATFORM" == "darwin") ]]; then
         ulimit -n 1024
     fi
 
@@ -147,11 +153,11 @@ function package ()
     pushd $pkg_dir > /dev/null
     rm -Rf *
 
-    if [[ ("$PLATFORM" == "linux") || ("$PLATFORM" == "darwin") ]]; then
+    if [[ ("$CURRENT_PLATFORM" == "linux") || ("$CURRENT_PLATFORM" == "darwin") ]]; then
         tar_name="${agent_pkg_name}.tar.gz"
         echo "Creating $tar_name in ${LAYOUT_DIR}"
         tar -czf "${tar_name}" -C ${LAYOUT_DIR} .
-    elif [[ ("$PLATFORM" == "windows") ]]; then
+    elif [[ ("$CURRENT_PLATFORM" == "windows") ]]; then
         zip_name="${agent_pkg_name}.zip"
         echo "Convert ${LAYOUT_DIR} to Windows style path"
         window_path=${LAYOUT_DIR:1}
@@ -176,7 +182,7 @@ if [[ (! -d "${DOTNETSDK_INSTALLDIR}") || (! -e "${DOTNETSDK_INSTALLDIR}/.${DOTN
     rm -Rf ${DOTNETSDK_DIR}
 
     # run dotnet-install.ps1 on windows, dotnet-install.sh on linux
-    if [[ ("$PLATFORM" == "windows") ]]; then
+    if [[ ("$CURRENT_PLATFORM" == "windows") ]]; then
         echo "Convert ${DOTNETSDK_INSTALLDIR} to Windows style path"
         sdkinstallwindow_path=${DOTNETSDK_INSTALLDIR:1}
         sdkinstallwindow_path=${sdkinstallwindow_path:0:1}:${sdkinstallwindow_path:1}
@@ -193,6 +199,9 @@ export PATH=${DOTNETSDK_INSTALLDIR}:$PATH
 
 heading "Dotnet SDK Version"
 dotnet --version
+
+heading Externals ...
+bash ./Misc/externals.sh $CURRENT_PLATFORM "Pre-Cache" || checkRC "externals.sh Pre-Cache"
 
 case $DEV_CMD in
    "build") build;;

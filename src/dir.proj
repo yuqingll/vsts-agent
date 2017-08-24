@@ -48,13 +48,13 @@
   </Target>
 
   <Target Name="Build" DependsOnTargets="Restore;GenerateConstant">
-    <PropertyGroup Condition="'$(PackageRuntime)' == 'win7-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'win-x64'" >
         <TargetOS>OS_WINDOWS</TargetOS>
     </PropertyGroup> 
-    <PropertyGroup Condition="'$(PackageRuntime)' == 'osx.10.11-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'osx-x64'" >
         <TargetOS>OS_OSX</TargetOS>
     </PropertyGroup> 
-    <PropertyGroup Condition="'$(PackageRuntime)' != 'linux-x64' AND '$(PackageRuntime)' != 'osx.10.11-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'linux-x64'" >
         <TargetOS>OS_LINUX</TargetOS>
     </PropertyGroup> 
     <Exec Command="dotnet publish Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
@@ -63,13 +63,13 @@
   </Target>
    
    <Target Name="Test" DependsOnTargets="GenerateConstant">
-    <PropertyGroup Condition="'$(PackageRuntime)' == 'win7-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'win-x64'" >
         <TargetOS>OS_WINDOWS</TargetOS>
     </PropertyGroup> 
-    <PropertyGroup Condition="'$(PackageRuntime)' == 'osx.10.11-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'osx-x64'" >
         <TargetOS>OS_OSX</TargetOS>
     </PropertyGroup> 
-    <PropertyGroup Condition="'$(PackageRuntime)' != 'linux-x64' AND '$(PackageRuntime)' != 'osx.10.11-x64'" >
+    <PropertyGroup Condition="'$(PackageRuntime)' == 'linux-x64'" >
         <TargetOS>OS_LINUX</TargetOS>
     </PropertyGroup> 
     <Exec Command="dotnet restore Test\Test.csproj --runtime $(PackageRuntime)" ConsoleToMSBuild="true" />
@@ -87,17 +87,11 @@
     <Copy SourceFiles="@(LayoutBinFiles)"  DestinationFolder="$(MSBuildProjectDirectory)/../_layout/bin/%(RecursiveDir)"/>
 
     <ItemGroup>
-        <LayoutRootFilesToDelete Include="$(MSBuildProjectDirectory)/../_layout/*.cmd" Condition="'$(PackageRuntime)' != 'win7-x64'"/>
-        <LayoutRootFilesToDelete Include="$(MSBuildProjectDirectory)/../_layout/*.sh" Condition="'$(PackageRuntime)' == 'win7-x64'"/>
+        <LayoutRootFilesToDelete Include="$(MSBuildProjectDirectory)/../_layout/*.cmd" Condition="'$(PackageRuntime)' != 'win-x64'"/>
+        <LayoutRootFilesToDelete Include="$(MSBuildProjectDirectory)/../_layout/*.sh" Condition="'$(PackageRuntime)' == 'win-x64'"/>
     </ItemGroup>
 
     <Delete Files="@(LayoutRootFilesToDelete)" />
-    
-    <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20Download Externals" Importance="high"/>
-    <Message Text="-----------------------------------------" Importance="high"/> 
-
-    <!--<Exec Command="bash $(MSBuildProjectDirectory)/Misc/externals.sh" ConsoleToMSBuild="True" />-->
   </Target>
 
   <Target Name="Clean">
