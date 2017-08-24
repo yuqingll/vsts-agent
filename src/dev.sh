@@ -12,9 +12,13 @@ DEV_CONFIG=$2
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAYOUT_DIR="$SCRIPT_DIR/../_layout"
 DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads"
+PACKAGE_DIR="$SCRIPT_DIR/../_package"
 DOTNETSDK_ROOT="$SCRIPT_DIR/../_dotnetsdk"
 DOTNETSDK_VERSION="2.0.0"
 DOTNETSDK_INSTALLDIR="$DOTNETSDK_ROOT/$DOTNETSDK_VERSION"
+
+WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
+WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/Debug"
 
 pushd $SCRIPT_DIR
 
@@ -28,19 +32,12 @@ if [[ (`uname` == "Linux") || (`uname` == "Darwin") ]]; then
     CURRENT_PLATFORM=`echo \`uname\` | awk '{print tolower($0)}'`
 fi
 
-# allow for #if defs in code
-define_os='OS_WINDOWS'
-runtime_id='win-x64'
+RUNTIME_ID='win-x64'
 if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
-   define_os='OS_LINUX'
-   runtime_id='linux-x64'
+   RUNTIME_ID='linux-x64'
 elif [[ "$CURRENT_PLATFORM" == 'darwin' ]]; then
-   define_os='OS_OSX'
-   runtime_id='osx-x64'
+   RUNTIME_ID='osx-x64'
 fi
-
-WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
-WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/Debug"
 
 function failed()
 {
@@ -75,7 +72,8 @@ function heading()
 function build ()
 {
     heading Building ...
-    dotnet msbuild //t:Build //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    
+    dotnet msbuild //t:Build //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
     
     if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
         vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
@@ -96,7 +94,7 @@ function layout ()
 {
     heading Create layout ...
 
-    dotnet msbuild //t:layout //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    dotnet msbuild //t:layout //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
     #change execution flag to allow running with sudo
     if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
@@ -116,37 +114,24 @@ function runtest ()
 
     heading Testing ...
     export VSTS_AGENT_SRC_DIR=${SCRIPT_DIR}
-    dotnet msbuild //t:test //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed "failed tests" 
+    dotnet msbuild //t:test //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed "failed tests" 
 }
 
 function package ()
 {
-    # get the runtime we are build for
-    # if exist Agent.Listener/bin/${BUILD_CONFIG}/netcoreapp1.1
-    build_folder="Agent.Listener/bin/${BUILD_CONFIG}/netcoreapp1.1"
-    if [ ! -d "${build_folder}" ]; then
-        echo "You must build first.  Expecting to find ${build_folder}"
+    if [ ! -d "${LAYOUT_DIR}/bin" ]; then
+        echo "You must build first.  Expecting to find ${LAYOUT_DIR}/bin"
     fi
 
-    pushd "${build_folder}" > /dev/null
-    pwd
-    runtime_folder=`ls -d */`
-
-    pkg_runtime=${runtime_folder%/}
-    popd > /dev/null
-
-    pkg_dir=`pwd`/../_package
-
     agent_ver=`${LAYOUT_DIR}/bin/Agent.Listener --version` || failed "version"
-    agent_pkg_name="vsts-agent-${pkg_runtime}-${agent_ver}"
-    # -$(date +%m)$(date +%d)"
+    agent_pkg_name="vsts-agent-${RUNTIME_ID}-${agent_ver}"
 
     heading "Packaging ${agent_pkg_name}"
 
     rm -Rf ${LAYOUT_DIR}/_diag
     find ${LAYOUT_DIR}/bin -type f -name '*.pdb' -delete
-    mkdir -p $pkg_dir
-    pushd $pkg_dir > /dev/null
+    mkdir -p $PACKAGE_DIR
+    pushd $PACKAGE_DIR > /dev/null
     rm -Rf *
 
     if [[ ("$CURRENT_PLATFORM" == "linux") || ("$CURRENT_PLATFORM" == "darwin") ]]; then
