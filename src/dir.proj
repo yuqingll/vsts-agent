@@ -1,19 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="Restore">
-    <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20%20%20%20Dotnet Restore" Importance="high"/>
-    <Message Text="-----------------------------------------" Importance="high"/>
-    <Exec Command="dotnet restore Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj --runtime $(PackageRuntime)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet restore Agent.Listener\Agent.Listener.csproj --runtime $(PackageRuntime)" ConsoleToMSBuild="true" />
-    <Exec Command="dotnet restore Agent.Worker\Agent.Worker.csproj --runtime $(PackageRuntime)" ConsoleToMSBuild="true" />
-    <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20Dotnet Restore Finished" Importance="high"/>
-    <Message Text="-----------------------------------------" Importance="high"/>
-  </Target>
-
   <Target Name="GenerateConstant">
-    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="false">
+    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitInfoCommitHash" />
     </Exec>
     <Message Text="Building $(GitInfoCommitHash) --- $(PackageRuntime)" Importance="high"/>
@@ -47,7 +35,7 @@
             Encoding="Unicode"/>
   </Target>
 
-  <Target Name="Build" DependsOnTargets="Restore;GenerateConstant">
+  <Target Name="Build" DependsOnTargets="GenerateConstant">
     <PropertyGroup Condition="'$(PackageRuntime)' == 'win-x64'" >
         <TargetOS>OS_WINDOWS</TargetOS>
     </PropertyGroup> 
@@ -72,7 +60,6 @@
     <PropertyGroup Condition="'$(PackageRuntime)' == 'linux-x64'" >
         <TargetOS>OS_LINUX</TargetOS>
     </PropertyGroup> 
-    <Exec Command="dotnet restore Test\Test.csproj --runtime $(PackageRuntime)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet build Test\Test.csproj -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet test Test\Test.csproj --no-build --logger:trx" ConsoleToMSBuild="true" />
   </Target>
@@ -95,10 +82,9 @@
   </Target>
 
   <Target Name="Clean">
-    <Message Text="-----------------------------------------" Importance="high"/>
-    <Message Text="%20%20%20%20%20%20%20%20%20Clean build outputs" Importance="high"/>
-    <Message Text="-----------------------------------------" Importance="high"/> 
-    <RemoveDir  Directories="$(MSBuildProjectDirectory)/../_layout" />
+    <RemoveDir  Directories="$(MSBuildProjectDirectory)/../_layout/bin" />
+    <RemoveDir  Directories="$(MSBuildProjectDirectory)/../_layout/externals" />
+    <RemoveDir  Directories="$(MSBuildProjectDirectory)/../_layout/*" />
     <RemoveDir  Directories="Microsoft.VisualStudio.Services.Agent/bin" />
     <RemoveDir  Directories="Microsoft.VisualStudio.Services.Agent/obj" />
     <RemoveDir  Directories="Agent.Listener/bin" />

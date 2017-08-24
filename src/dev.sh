@@ -74,33 +74,29 @@ function heading()
 
 function build ()
 {
+    heading Building ...
     dotnet msbuild //t:Build //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
     
     if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
-        reg_out=`reg query "HKLM\SOFTWARE\Microsoft\MSBuild\ToolsVersions\4.0" -v MSBuildToolsPath`
-        msbuild_location=`echo $reg_out | tr -d '\r\n' | tr -s ' ' | cut -d' ' -f5 | tr -d '\r\n'`
-              
-        local rc=$?
-        if [ $rc -ne 0 ]; then
+        vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
+        vs_location=`$vswhere -latest -property installationPath`
+        msbuild_location="$vs_location""\MSBuild\15.0\Bin\msbuild.exe"
+        
+        echo $msbuild_location
+
+        if [[ ! -e "${msbuild_location}" ]]; then
             failed "Can not find msbuild location, failing build"
         fi
-    fi
 
-    if [[ "$define_os" == 'OS_WINDOWS' && "$msbuild_location" != "" ]]; then
-        $msbuild_location/msbuild.exe $WINDOWSAGENTSERVICE_PROJFILE || failed "msbuild AgentService.csproj"
+        "$msbuild_location" $WINDOWSAGENTSERVICE_PROJFILE || failed "msbuild AgentService.csproj"
     fi
 }
 
 function layout ()
 {
-    # layout
-    dotnet msbuild //t:layout //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    heading Create layout ...
 
-    # if [[ "$define_os" == 'OS_WINDOWS' ]]; then
-    #     # TODO Make sure to package Release build instead of debug build
-    #     echo Copying Agent.Service
-    #     cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
-    # fi
+    dotnet msbuild //t:layout //p:PackageRuntime=${runtime_id} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
     #change execution flag to allow running with sudo
     if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
@@ -108,7 +104,7 @@ function layout ()
         chmod +x ${LAYOUT_DIR}/bin/Agent.Worker
     fi
 
-    heading Externals ...
+    heading "Setup externals folder for $CURRENT_PLATFORM agent's layout"
     bash ./Misc/externals.sh $CURRENT_PLATFORM || checkRC externals.sh
 }
 
@@ -200,7 +196,7 @@ export PATH=${DOTNETSDK_INSTALLDIR}:$PATH
 heading "Dotnet SDK Version"
 dotnet --version
 
-heading Externals ...
+heading "Pre-cache external resources for $CURRENT_PLATFORM platform ..."
 bash ./Misc/externals.sh $CURRENT_PLATFORM "Pre-Cache" || checkRC "externals.sh Pre-Cache"
 
 case $DEV_CMD in

@@ -2,13 +2,6 @@
 PLATFORM=$1
 PRECACHE=$2
 
-case $PLATFORM in
-   "windows") echo "Prepare external resources for Windows platform";;
-   "linux") echo "Prepare external resources for Linux platform";;
-   "osx") echo "Prepare external resources for OSX platform";;
-   *) echo "Invalid PLATFORM: $PLATFORM.  Use windows, linux, or osx" & exit 1;;
-esac
-
 CONTAINER_URL=https://vstsagenttools.blob.core.windows.net/tools
 NODE_URL=https://nodejs.org/dist
 NODE_VERSION="6.10.3"
@@ -49,72 +42,69 @@ function acquireExternalTool() {
     # Check if the download already exists.
     local download_target="$DOWNLOAD_DIR/$relative_url"
     local download_basename="$(basename $download_target)"
-    if [ -f "$download_target" ]; then
-        echo "Download exists: $download_basename"
-    else
-        # Delete any previous partial file.
-        local partial_target="$DOWNLOAD_DIR/partial/$download_basename"
-        mkdir -p "$(dirname "$partial_target")" || checkRC 'mkdir'
-        if [ -f "$partial_target" ]; then
-            rm "$partial_target" || checkRC 'rm'
-        fi
 
-        # Download from source to the partial file.
-        echo "Downloading $download_source"
-        mkdir -p "$(dirname $download_target)" || checkRC 'mkdir'
-        # curl -f Fail silently (no output at all) on HTTP errors (H)
-        #      -k Allow connections to SSL sites without certs (H)
-        #      -S Show error. With -s, make curl show errors when they occur
-        #      -L Follow redirects (H)
-        #      -o FILE    Write to FILE instead of stdout
-        curl -fkSL -o "$partial_target" "$download_source" 2>"${download_target}_download.log" || checkRC 'curl'
-
-        # Move the partial file to the download target.
-        mv "$partial_target" "$download_target" || checkRC 'mv'
-    fi
-
-    # Stop when we only need to pre-cache to _download
     if [[ "$PRECACHE" != "" ]]; then
-        echo "Cached $2"
-        return 0
-    fi
+        if [ -f "$download_target" ]; then
+            echo "Download exists: $download_basename"
+        else
+            # Delete any previous partial file.
+            local partial_target="$DOWNLOAD_DIR/partial/$download_basename"
+            mkdir -p "$(dirname "$partial_target")" || checkRC 'mkdir'
+            if [ -f "$partial_target" ]; then
+                rm "$partial_target" || checkRC 'rm'
+            fi
 
-    # Extract to layout.
-    mkdir -p "$target_dir" || checkRC 'mkdir'
-    local nested_dir=""
-    if [[ "$download_basename" == *.zip ]]; then
-        # Extract the zip.
-        echo "Extracting zip to layout"
-        unzip "$download_target" -d "$target_dir" > /dev/null
-        local rc=$?
-        if [[ $rc -ne 0 && $rc -ne 1 ]]; then
-            failed "unzip failed with return code $rc"
-        fi
+            # Download from source to the partial file.
+            echo "Downloading $download_source"
+            mkdir -p "$(dirname $download_target)" || checkRC 'mkdir'
+            # curl -f Fail silently (no output at all) on HTTP errors (H)
+            #      -k Allow connections to SSL sites without certs (H)
+            #      -S Show error. With -s, make curl show errors when they occur
+            #      -L Follow redirects (H)
+            #      -o FILE    Write to FILE instead of stdout
+            curl -fkSL -o "$partial_target" "$download_source" 2>"${download_target}_download.log" || checkRC 'curl'
 
-        # Capture the nested directory path if the fix_nested_dir flag is set.
-        if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
-            nested_dir="${download_basename%.zip}" # Remove the trailing ".zip".
-        fi
-    elif [[ "$download_basename" == *.tar.gz ]]; then
-        # Extract the tar gz.
-        echo "Extracting tar gz to layout"
-        tar xzf "$download_target" -C "$target_dir" > /dev/null || checkRC 'tar'
-
-        # Capture the nested directory path if the fix_nested_dir flag is set.
-        if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
-            nested_dir="${download_basename%.tar.gz}" # Remove the trailing ".tar.gz".
+            # Move the partial file to the download target.
+            mv "$partial_target" "$download_target" || checkRC 'mv'
         fi
     else
-        # Copy the file.
-        echo "Copying to layout"
-        cp "$download_target" "$target_dir/" || checkRC 'cp'
-    fi
+        # Extract to layout.
+        mkdir -p "$target_dir" || checkRC 'mkdir'
+        local nested_dir=""
+        if [[ "$download_basename" == *.zip ]]; then
+            # Extract the zip.
+            echo "Extracting zip to layout"
+            unzip "$download_target" -d "$target_dir" > /dev/null
+            local rc=$?
+            if [[ $rc -ne 0 && $rc -ne 1 ]]; then
+                failed "unzip failed with return code $rc"
+            fi
 
-    # Fixup the nested directory.
-    if [[ "$nested_dir" != "" ]]; then
-        if [ -d "$target_dir/$nested_dir" ]; then
-            mv "$target_dir/$nested_dir"/* "$target_dir/" || checkRC 'mv'
-            rmdir "$target_dir/$nested_dir" || checkRC 'rmdir'
+            # Capture the nested directory path if the fix_nested_dir flag is set.
+            if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
+                nested_dir="${download_basename%.zip}" # Remove the trailing ".zip".
+            fi
+        elif [[ "$download_basename" == *.tar.gz ]]; then
+            # Extract the tar gz.
+            echo "Extracting tar gz to layout"
+            tar xzf "$download_target" -C "$target_dir" > /dev/null || checkRC 'tar'
+
+            # Capture the nested directory path if the fix_nested_dir flag is set.
+            if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
+                nested_dir="${download_basename%.tar.gz}" # Remove the trailing ".tar.gz".
+            fi
+        else
+            # Copy the file.
+            echo "Copying to layout"
+            cp "$download_target" "$target_dir/" || checkRC 'cp'
+        fi
+
+        # Fixup the nested directory.
+        if [[ "$nested_dir" != "" ]]; then
+            if [ -d "$target_dir/$nested_dir" ]; then
+                mv "$target_dir/$nested_dir"/* "$target_dir/" || checkRC 'mv'
+                rmdir "$target_dir/$nested_dir" || checkRC 'rmdir'
+            fi
         fi
     fi
 }
