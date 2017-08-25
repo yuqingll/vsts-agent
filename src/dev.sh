@@ -17,9 +17,6 @@ DOTNETSDK_ROOT="$SCRIPT_DIR/../_dotnetsdk"
 DOTNETSDK_VERSION="2.0.0"
 DOTNETSDK_INSTALLDIR="$DOTNETSDK_ROOT/$DOTNETSDK_VERSION"
 
-WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
-WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/Debug"
-
 pushd $SCRIPT_DIR
 
 BUILD_CONFIG="Debug"
@@ -38,6 +35,9 @@ if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
 elif [[ "$CURRENT_PLATFORM" == 'darwin' ]]; then
    RUNTIME_ID='osx-x64'
 fi
+
+WINDOWSAGENTSERVICE_PROJFILE="Agent.Service/Windows/AgentService.csproj"
+WINDOWSAGENTSERVICE_BIN="Agent.Service/Windows/bin/$BUILD_CONFIG"
 
 function failed()
 {
@@ -72,22 +72,25 @@ function heading()
 function build ()
 {
     heading "Building ..."
-    
-    dotnet msbuild //t:Build //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
-    
+        
+    dotnet_msbuild_args="//p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG}"
     if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
         vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
         vs_location=`$vswhere -latest -property installationPath`
         msbuild_location="$vs_location""\MSBuild\15.0\Bin\msbuild.exe"
-        
-        echo $msbuild_location
 
         if [[ ! -e "${msbuild_location}" ]]; then
             failed "Can not find msbuild location, failing build"
         fi
+        
+        msbuild_location_escape="${msbuild_location// /%20}"
+        dotnet_msbuild_args="$dotnet_msbuild_args //p:DesktopMSBuild=$msbuild_location_escape"
+        # "$msbuild_location" $WINDOWSAGENTSERVICE_PROJFILE //p:Configuration="$BUILD_CONFIG" || failed "msbuild AgentService.csproj"
 
-        "$msbuild_location" $WINDOWSAGENTSERVICE_PROJFILE || failed "msbuild AgentService.csproj"
+        # cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
     fi
+
+    dotnet msbuild //t:Build $dotnet_msbuild_args || failed build
 }
 
 function layout ()

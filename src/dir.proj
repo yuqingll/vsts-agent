@@ -48,6 +48,7 @@
     <Exec Command="dotnet publish Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet publish Agent.Listener\Agent.Listener.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
     <Exec Command="dotnet publish Agent.Worker\Agent.Worker.csproj --output %22$(MSBuildProjectDirectory)/../_layout/bin%22 --runtime $(PackageRuntime) -c $(BUILDCONFIG) /p:OSConstant=$(TargetOS)" ConsoleToMSBuild="true" />
+    <Exec Command="%22$(DesktopMSBuild)%22 Agent.Service/Windows/AgentService.csproj /p:Configuration=$(BUILDCONFIG) /p:OutputPath=%22$(MSBuildProjectDirectory)/../_layout/bin%22" ConsoleToMSBuild="true" Condition="'$(PackageRuntime)' == 'win-x64'" />
   </Target>
    
    <Target Name="Test" DependsOnTargets="GenerateConstant">
