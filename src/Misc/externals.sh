@@ -30,7 +30,7 @@ function checkRC() {
 
 function acquireExternalTool() {
     local download_source=$1 # E.g. https://vstsagenttools.blob.core.windows.net/tools/pdbstr/1/pdbstr.zip
-    local target_dir="$LAYOUT_DIR/externals/$2" # E.g. $LAYOUT_DIR/externals/pdbstr
+    local layout_target="$LAYOUT_DIR/externals" # E.g. $LAYOUT_DIR/externals/pdbstr
     local fix_nested_dir=$3 # Flag that indicates whether to move nested contents up one directory. E.g. TEE-CLC-14.0.4.zip
                             # directly contains only a nested directory TEE-CLC-14.0.4. When this flag is set, the contents
                             # of the nested TEE-CLC-14.0.4 directory are moved up one directory, and then the empty directory
@@ -42,6 +42,7 @@ function acquireExternalTool() {
     # Check if the download already exists.
     local download_target="$DOWNLOAD_DIR/$relative_url"
     local download_basename="$(basename $download_target)"
+    local download_dir="$(dirname $download_target)"
 
     if [[ "$PRECACHE" != "" ]]; then
         if [ -f "$download_target" ]; then
@@ -66,46 +67,51 @@ function acquireExternalTool() {
 
             # Move the partial file to the download target.
             mv "$partial_target" "$download_target" || checkRC 'mv'
+
+            local nested_dir=""
+            # Extract to current directory
+            if [[ "$download_basename" == *.zip ]]; then
+                # Extract the zip.
+                echo "Extracting zip"
+                unzip "$download_target" -d "$download_dir/$2" > /dev/null
+                local rc=$?
+                if [[ $rc -ne 0 && $rc -ne 1 ]]; then
+                    failed "unzip failed with return code $rc"
+                fi
+
+                # Capture the nested directory path if the fix_nested_dir flag is set.
+                if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
+                    nested_dir="${download_basename%.zip}" # Remove the trailing ".zip".
+                fi
+            elif [[ "$download_basename" == *.tar.gz ]]; then
+                # Extract the tar gz.
+                echo "Extracting tar gz"
+                tar xzf "$download_target" -C "$download_dir/$2" > /dev/null || checkRC 'tar'
+
+                # Capture the nested directory path if the fix_nested_dir flag is set.
+                if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
+                    nested_dir="${download_basename%.tar.gz}" # Remove the trailing ".tar.gz".
+                fi
+            else
+                # Create a nested folder for the file.
+                echo "Create nested folder"
+                mkdir -p "$download_dir/$2" || checkRC 'mkdir'
+                cp "$download_target" "$download_dir/$2/" || checkRC 'cp'
+            fi
+
+            # Fixup the nested directory.
+            if [[ "$nested_dir" != "" ]]; then
+                if [ -d "$download_dir/$nested_dir" ]; then
+                    mv "$download_dir/$nested_dir"/* "$download_dir/" || checkRC 'mv'
+                    rmdir "$download_dir/$nested_dir" || checkRC 'rmdir'
+                fi
+            fi
         fi
     else
-        # Extract to layout.
-        mkdir -p "$target_dir" || checkRC 'mkdir'
-        local nested_dir=""
-        if [[ "$download_basename" == *.zip ]]; then
-            # Extract the zip.
-            echo "Extracting zip to layout"
-            unzip "$download_target" -d "$target_dir" > /dev/null
-            local rc=$?
-            if [[ $rc -ne 0 && $rc -ne 1 ]]; then
-                failed "unzip failed with return code $rc"
-            fi
-
-            # Capture the nested directory path if the fix_nested_dir flag is set.
-            if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
-                nested_dir="${download_basename%.zip}" # Remove the trailing ".zip".
-            fi
-        elif [[ "$download_basename" == *.tar.gz ]]; then
-            # Extract the tar gz.
-            echo "Extracting tar gz to layout"
-            tar xzf "$download_target" -C "$target_dir" > /dev/null || checkRC 'tar'
-
-            # Capture the nested directory path if the fix_nested_dir flag is set.
-            if [[ "$fix_nested_dir" == "fix_nested_dir" ]]; then
-                nested_dir="${download_basename%.tar.gz}" # Remove the trailing ".tar.gz".
-            fi
-        else
-            # Copy the file.
-            echo "Copying to layout"
-            cp "$download_target" "$target_dir/" || checkRC 'cp'
-        fi
-
-        # Fixup the nested directory.
-        if [[ "$nested_dir" != "" ]]; then
-            if [ -d "$target_dir/$nested_dir" ]; then
-                mv "$target_dir/$nested_dir"/* "$target_dir/" || checkRC 'mv'
-                rmdir "$target_dir/$nested_dir" || checkRC 'rmdir'
-            fi
-        fi
+        # Copy to layout.
+        echo "Copying to layout"
+        mkdir -p "$layout_target" || checkRC 'mkdir'        
+        cp -r "$download_dir/$2/" "$layout_target/" || checkRC 'cp'
     fi
 }
 
