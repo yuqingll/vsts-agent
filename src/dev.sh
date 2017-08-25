@@ -71,7 +71,7 @@ function heading()
 
 function build ()
 {
-    heading Building ...
+    heading "Building ..."
     
     dotnet msbuild //t:Build //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
     
@@ -92,7 +92,7 @@ function build ()
 
 function layout ()
 {
-    heading Create layout ...
+    heading "Create layout ..."
 
     dotnet msbuild //t:layout //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
@@ -108,11 +108,12 @@ function layout ()
 
 function runtest ()
 {
+    heading "Testing ..."
+
     if [[ ("$CURRENT_PLATFORM" == "linux") || ("$CURRENT_PLATFORM" == "darwin") ]]; then
         ulimit -n 1024
     fi
 
-    heading Testing ...
     export VSTS_AGENT_SRC_DIR=${SCRIPT_DIR}
     dotnet msbuild //t:test //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed "failed tests" 
 }
