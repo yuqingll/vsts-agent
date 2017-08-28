@@ -83,11 +83,9 @@ function build ()
             failed "Can not find msbuild location, failing build"
         fi
         
+        # replace ' ' with xml encoding %20
         msbuild_location_escape="${msbuild_location// /%20}"
         dotnet_msbuild_args="$dotnet_msbuild_args //p:DesktopMSBuild=$msbuild_location_escape"
-        # "$msbuild_location" $WINDOWSAGENTSERVICE_PROJFILE //p:Configuration="$BUILD_CONFIG" || failed "msbuild AgentService.csproj"
-
-        # cp -Rf $WINDOWSAGENTSERVICE_BIN/* ${LAYOUT_DIR}/bin
     fi
 
     dotnet msbuild //t:Build $dotnet_msbuild_args || failed build
