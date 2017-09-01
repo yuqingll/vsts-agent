@@ -72,45 +72,13 @@ function heading()
 function build ()
 {
     heading "Building ..."
-        
-    dotnet_msbuild_args="//p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG}"
-    if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
-        vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
-        vs_location=`$vswhere -latest -property installationPath`
-        msbuild_location="$vs_location""\MSBuild\15.0\Bin\msbuild.exe"
-
-        if [[ ! -e "${msbuild_location}" ]]; then
-            failed "Can not find msbuild location, failing build"
-        fi
-        
-        # replace ' ' with xml encoding %20
-        msbuild_location_escape="${msbuild_location// /%20}"
-        dotnet_msbuild_args="$dotnet_msbuild_args //p:DesktopMSBuild=$msbuild_location_escape"
-    fi
-
-    dotnet msbuild //t:Build $dotnet_msbuild_args || failed build
+    dotnet msbuild //t:Build //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 }
 
 function layout ()
 {
     heading "Create layout ..."
-
-    dotnet_msbuild_args="//p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG}"
-    if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
-        vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
-        vs_location=`$vswhere -latest -property installationPath`
-        msbuild_location="$vs_location""\MSBuild\15.0\Bin\msbuild.exe"
-
-        if [[ ! -e "${msbuild_location}" ]]; then
-            failed "Can not find msbuild location, failing build"
-        fi
-        
-        # replace ' ' with xml encoding %20
-        msbuild_location_escape="${msbuild_location// /%20}"
-        dotnet_msbuild_args="$dotnet_msbuild_args //p:DesktopMSBuild=$msbuild_location_escape"
-    fi
-
-    dotnet msbuild //t:layout $dotnet_msbuild_args || failed build
+    dotnet msbuild //t:layout //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
     #change execution flag to allow running with sudo
     if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then
@@ -200,6 +168,18 @@ dotnet --version
 
 heading "Pre-cache external resources for $CURRENT_PLATFORM platform ..."
 bash ./Misc/externals.sh $CURRENT_PLATFORM "Pre-Cache" || checkRC "externals.sh Pre-Cache"
+
+if [[ "$CURRENT_PLATFORM" == 'windows' ]]; then
+    vswhere=`find $DOWNLOAD_DIR -name vswhere.exe | head -1`
+    vs_location=`$vswhere -latest -property installationPath`
+    msbuild_location="$vs_location""\MSBuild\15.0\Bin\msbuild.exe"
+
+    if [[ ! -e "${msbuild_location}" ]]; then
+        failed "Can not find msbuild location, failing build"
+    fi
+
+    export DesktopMSBuild="$msbuild_location"
+fi
 
 case $DEV_CMD in
    "build") build;;
