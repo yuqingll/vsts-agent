@@ -1,7 +1,7 @@
 var p = require('child_process');
 var fs = require('fs');
 
-var wellKnownDependencies = ['libc\.so\.\d', 'libm\.so\.\d', 'libstdc++\.so\.\d', 'libpthread\.so\.\d', 'linux-vdso\.so\.\d', 'libgcc_s\.so\.\d', 'librt\.so\.\d', 'libdl\.so\.\d', 'ld-linux-x86-64.so\.\d', 'libcom_err\.so\.2', 'libcrypt\.so\.1', 'libgpg-error\.so\.0', 'liblzma\.so\.5', 'libuuid\.so\.1'];
+var wellKnownDependencies = [/libc\.so\.\d/gi, /libm\.so\.\d/gi, /libstdc\+\+\.so\.\d/gi, /libpthread\.so\.\d/gi, /linux-vdso\.so\.\d/gi, /libgcc_s\.so\.\d/gi, /librt\.so\.\d/gi, /libdl\.so\.\d/gi, /ld-linux-x86-64.so\.\d/gi, /libcom_err\.so\.2/gi, /libcrypt\.so\.1/gi, /libgpg-error\.so\.0/gi, /liblzma\.so\.5/gi, /libuuid\.so\.1/gi];
 var dependencyScanQueue = [];
 var currentIndex = 0;
 
@@ -21,6 +21,7 @@ var ldd = function (file) {
     var deps = [];
     for (var i = 0; i < outputs.length; i++) {
         var dep_path = outputs[i].replace("\t", "").replace(/\(0x[a-z0-9]+\)$/gi, "").trim();
+        console.log(dep_path);
         var dep;
         var path;
 
@@ -60,10 +61,14 @@ var skip = function (file) {
     }
 }
 
-process.argv.forEach((arg) => {
+var args = process.argv;
+args.splice(0, 2);
+args.forEach((arg) => {
     console.log('Scan dependencies for: ' + arg);
     var ret = ldd(arg);
-    dependencyScanQueue.push(ret);
+    ret.forEach((d) => {
+        dependencyScanQueue.push(d);
+    });
 })
 
 
