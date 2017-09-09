@@ -1,7 +1,22 @@
 var p = require('child_process');
 var fs = require('fs');
 
-var wellKnownDependencies = [/libc\.so\.\d/gi, /libm\.so\.\d/gi, /libstdc\+\+\.so\.\d/gi, /libpthread\.so\.\d/gi, /linux-vdso\.so\.\d/gi, /libgcc_s\.so\.\d/gi, /librt\.so\.\d/gi, /libdl\.so\.\d/gi, /ld-linux-x86-64.so\.\d/gi, /libcom_err\.so\.2/gi, /libcrypt\.so\.1/gi, /libgpg-error\.so\.0/gi, /liblzma\.so\.5/gi, /libuuid\.so\.1/gi];
+var wellKnownDependencies = [
+    /libc\.so\.\d/gi,
+    /libm\.so\.\d/gi,
+    /libstdc\+\+\.so\.\d/gi,
+    /libpthread\.so\.\d/gi,
+    /linux-vdso\.so\.\d/gi,
+    /libgcc_s\.so\.\d/gi,
+    /librt\.so\.\d/gi,
+    /libdl\.so\.\d/gi,
+    /ld-linux-x86-64.so\.\d/gi,
+    /libcom_err\.so\.2/gi,
+    /libcrypt\.so\.1/gi,
+    /libgpg-error\.so\.0/gi,
+    /liblzma\.so\.5/gi,
+    /libuuid\.so\.1/gi
+];
 var dependencyScanQueue = [];
 var currentIndex = 0;
 
@@ -65,12 +80,15 @@ var args = process.argv;
 args.splice(0, 2);
 args.forEach((arg) => {
     console.log('Scan dependencies for: ' + arg);
+    if (!fs.existsSync(arg)) {
+        throw new Error('File does not exist: ' + arg);
+    }
+
     var ret = ldd(arg);
     ret.forEach((d) => {
         dependencyScanQueue.push(d);
     });
 })
-
 
 while (currentIndex < dependencyScanQueue.length) {
     var candidate = dependencyScanQueue[currentIndex];
