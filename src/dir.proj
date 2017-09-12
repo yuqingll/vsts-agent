@@ -7,11 +7,11 @@
     <Message Text="Building $(GitInfoCommitHash) --- $(PackageRuntime)" Importance="high"/>
 
     <ItemGroup>
-        <BuildConstants Include="///////////////////////////////////////////////////////////////////////////////////////////////////"/>
-        <BuildConstants Include="//"/>
-        <BuildConstants Include="//  DO NOT CHECKIN THE GENERATED .cs version of this file"/>
-        <BuildConstants Include="//"/>
-        <BuildConstants Include="///////////////////////////////////////////////////////////////////////////////////////////////////%0A"/>
+        <BuildConstants Include="/**/"/>
+        <BuildConstants Include="/**/"/>
+        <BuildConstants Include="/*DO NOT CHECKIN THE GENERATED .cs version of this file*/"/>
+        <BuildConstants Include="/**/"/>
+        <BuildConstants Include="/**/%0A"/>
         <BuildConstants Include="namespace Microsoft.VisualStudio.Services.Agent"/>
         <BuildConstants Include="{"/>
         <BuildConstants Include="%20%20%20%20public static class BuildConstants"/>

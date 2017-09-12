@@ -13,7 +13,7 @@ get_abs_path() {
 }
 
 LAYOUT_DIR=$(get_abs_path `dirname $0`/../../_layout)
-DOWNLOAD_DIR=$(get_abs_path `dirname $0`/../../_downloads)
+DOWNLOAD_DIR=$(get_abs_path `dirname $0`/../../_downloads_v2)
 
 function failed() {
    local error=${1:-Undefined error}

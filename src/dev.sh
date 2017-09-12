@@ -11,7 +11,7 @@ DEV_CONFIG=$2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAYOUT_DIR="$SCRIPT_DIR/../_layout"
-DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads"
+DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads_v2"
 PACKAGE_DIR="$SCRIPT_DIR/../_package"
 DOTNETSDK_ROOT="$SCRIPT_DIR/../_dotnetsdk"
 DOTNETSDK_VERSION="2.0.0"
@@ -72,13 +72,13 @@ function heading()
 function build ()
 {
     heading "Building ..."
-    dotnet msbuild //t:Build //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    dotnet msbuild /t:Build /p:PackageRuntime=${RUNTIME_ID} /p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 }
 
 function layout ()
 {
     heading "Create layout ..."
-    dotnet msbuild //t:layout //p:PackageRuntime=${RUNTIME_ID} //p:BUILDCONFIG=${BUILD_CONFIG} || failed build
+    dotnet msbuild /t:layout /p:PackageRuntime=${RUNTIME_ID} /p:BUILDCONFIG=${BUILD_CONFIG} || failed build
 
     #change execution flag to allow running with sudo
     if [[ "$CURRENT_PLATFORM" == 'linux' ]]; then

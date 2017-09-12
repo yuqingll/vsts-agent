@@ -10,6 +10,7 @@
 **/*.json.pretty
 node_modules
 _downloads
+_downloads_v2
 _layout
 _package
 _dotnetsdk
