@@ -34,6 +34,7 @@ queue:
   parallel: number
   timeoutInMinutes: number
   cancelTimeoutInMinutes: number
+  container: string
   demands: string | [ string ]
   matrix: { string: { string: string } }
 ```
