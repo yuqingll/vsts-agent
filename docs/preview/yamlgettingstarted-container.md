@@ -80,7 +80,7 @@ phases:
 - phase: phase1
   queue:
     name: default
-    container: $(runtimeContainer)
+    container: $[variables['runtimeContainer']]
     matrix:
       ubuntu14:
         runtimeContainer: dev1
