@@ -12,7 +12,7 @@ resources:
   containers:
   - container: string # The container name, step will reference container by name.
 
-    { string: string } # Any container data used by the container type.
+    { string: object } # Any container data used by the container type.
 ```
 
 Docker container syntax
