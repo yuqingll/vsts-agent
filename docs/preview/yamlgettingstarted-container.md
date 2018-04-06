@@ -23,11 +23,14 @@ resources:
     
     image: string # Docker image name
 
-    registry: string # The private docker registry endpoint's name defined in VSTS
+    endpoint: string # The private docker registry endpoint's name defined in VSTS
 
     options: string # Any extra options you want to add for container startup.
     
     localImage: true | false # Whether the image is locally built and don't pull from docker registry
+    
+    env:
+      { string: string } # A dictionary of environment variables added during container creation
 ```
 
 ### Example
@@ -49,6 +52,9 @@ resources:
     image: ubuntu:17.10
     options: --hostname container-test --env test=foo --ip 192.168.0.1
     localImage: true
+    env:
+      envVariable1: envValue1
+      envVariable2: envValue2
 ```
 
 A simple build definition with phase using container may look like this:
