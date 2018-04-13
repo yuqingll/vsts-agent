@@ -638,5 +638,18 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public sealed class AgentPluginHandlerData : HandlerData
     {
         public override int Priority => 0;
+
+        public string EntryPoint
+        {
+            get
+            {
+                return GetInput(nameof(EntryPoint));
+            }
+
+            set
+            {
+                SetInput(nameof(EntryPoint), value);
+            }
+        }
     }
 }
