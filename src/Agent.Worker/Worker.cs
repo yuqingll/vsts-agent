@@ -54,7 +54,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 ArgUtil.NotNull(jobMessage, nameof(jobMessage));
 
                 // Initialize the secret masker and set the thread culture.
-                InitializeSecretMasker(jobMessage);
+                // InitializeSecretMasker(jobMessage);
                 SetCulture(jobMessage);
 
                 // Start the job.

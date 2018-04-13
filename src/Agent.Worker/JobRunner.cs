@@ -41,6 +41,48 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             DateTime jobStartTimeUtc = DateTime.UtcNow;
 
+            var tfsGit = new Pipelines.RepositoryResource()
+            {
+                Endpoint = new Pipelines.ServiceEndpointReference() { Name = WellKnownServiceEndpointNames.SystemVssConnection },
+                Id = "11e2c5c2-0b38-4b8d-965d-1e1f275eb20a",
+                Alias = "self",
+                Type = "TfsGit",
+                Url = new Uri("https://tingweu.visualstudio.com/_git/g"),
+                Version = "878ca37d598e35c6a1e2ec678e5355682d51dde1",
+            };
+            tfsGit.Properties.Set<bool>("clean", false);
+            tfsGit.Properties.Set<string>("branch", "master");
+            tfsGit.Properties.Set<string>("name", "g");
+            // gated check-in stuff
+
+            var checkoutTask = new Pipelines.TaskStep()
+            {
+                Condition = "succeeded()",
+                ContinueOnError = false,
+                Name = "checkout",
+                Id = Guid.NewGuid(),
+                DisplayName = "GetSource",
+                Enabled = true,
+                Inputs = {
+                    {
+                        "Repository", "g"
+                    },
+                    {
+                        "clean", "true"
+                    }
+                },
+                Reference = new Pipelines.TaskStepDefinitionReference()
+                {
+                    Id = new Guid(WellKnownAgentPluginTasks.CheckoutTaskId),
+                    Name = "checkout",
+                    Version = "1.0.0"
+                }
+            };
+
+            message.Resources.Repositories.Add(tfsGit);
+            message.Steps.Insert(0, checkoutTask);
+            message.Resources.Endpoints.RemoveAt(0);
+
             // Agent.RunMode
             RunMode runMode;
             if (message.Variables.ContainsKey(Constants.Variables.Agent.RunMode) &&

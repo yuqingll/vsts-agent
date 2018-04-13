@@ -12,12 +12,52 @@ using System.Threading.Tasks;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker
 {
-        [ServiceLocator(Default = typeof(TaskManager))]
+    [ServiceLocator(Default = typeof(TaskManager))]
     public interface ITaskManager : IAgentService
     {
         Task DownloadAsync(IExecutionContext executionContext, IEnumerable<Pipelines.JobStep> steps);
 
         Definition Load(Pipelines.TaskStep task);
+    }
+    public static class WellKnownAgentPluginTasks
+    {
+        public static string CheckoutTaskId = "c61807ba-5e20-4b70-bd8c-3683c9f74003";
+
+        public static Definition CheckoutTask = new Definition()
+        {
+            Directory = string.Empty,
+            Data = new DefinitionData()
+            {
+                Author = "Ting",
+                Description = "Checkout",
+                HelpMarkDown = "Call Ting",
+                FriendlyName = "Get Source",
+                Inputs = new TaskInputDefinition[]
+                {
+                    new TaskInputDefinition()
+                    {
+                        Name="repository",
+                        InputType = TaskInputType.String,
+                        DefaultValue="self",
+                        Required=true
+                    }
+                },
+                Execution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = "GetSource"
+                    }
+                },
+                PostJobExecution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = "Cleanup"
+                    }
+                }
+            }
+        };
     }
 
     public sealed class TaskManager : AgentService, ITaskManager
@@ -50,6 +90,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             foreach (var task in uniqueTasks.Select(x => x.Reference))
             {
+                if (string.Equals(task.Id.ToString("D"), WellKnownAgentPluginTasks.CheckoutTaskId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 await DownloadAsync(executionContext, task);
             }
         }
@@ -59,6 +104,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             // Validate args.
             Trace.Entering();
             ArgUtil.NotNull(task, nameof(task));
+
+            if (task.Reference.Id == Guid.Parse(WellKnownAgentPluginTasks.CheckoutTaskId))
+            {
+                return WellKnownAgentPluginTasks.CheckoutTask;
+            }
 
             // Initialize the definition wrapper object.
             var definition = new Definition() { Directory = GetDirectory(task.Reference) };
@@ -198,6 +248,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private PowerShell3HandlerData _powerShell3;
         private PowerShellExeHandlerData _powerShellExe;
         private ProcessHandlerData _process;
+        private AgentPluginHandlerData _agentPlugin;
 
         [JsonIgnore]
         public List<HandlerData> All => _all;
@@ -297,6 +348,20 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             set
             {
                 _process = value;
+                Add(value);
+            }
+        }
+
+        public AgentPluginHandlerData AgentPlugin
+        {
+            get
+            {
+                return _agentPlugin;
+            }
+
+            set
+            {
+                _agentPlugin = value;
                 Add(value);
             }
         }
@@ -568,5 +633,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 SetInput(nameof(WorkingDirectory), value);
             }
         }
+    }
+
+    public sealed class AgentPluginHandlerData : HandlerData
+    {
+        public override int Priority => 0;
     }
 }

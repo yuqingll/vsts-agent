@@ -25,6 +25,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         CancellationToken CancellationToken { get; }
         List<ServiceEndpoint> Endpoints { get; }
         List<SecureFile> SecureFiles { get; }
+        List<Pipelines.RepositoryResource> Repositories { get; }
         PlanFeatures Features { get; }
         Variables Variables { get; }
         Variables TaskVariables { get; }
@@ -79,6 +80,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public CancellationToken CancellationToken => _cancellationTokenSource.Token;
         public List<ServiceEndpoint> Endpoints { get; private set; }
         public List<SecureFile> SecureFiles { get; private set; }
+        public List<Pipelines.RepositoryResource> Repositories { get; private set; }
         public Variables Variables { get; private set; }
         public Variables TaskVariables { get; private set; }
         public HashSet<string> OutputVariables => _outputvariables;
@@ -355,6 +357,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             // SecureFiles
             SecureFiles = message.Resources.SecureFiles;
 
+            // Repositories
+            Repositories = message.Resources.Repositories;
+
             // Variables (constructor performs initial recursive expansion)
             List<string> warnings;
             Variables = new Variables(HostContext, message.Variables, out warnings);
@@ -374,14 +379,14 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 var dockerContainer = new Pipelines.ContainerResource()
                 {
-                    Name = "vsts_container_preview"
+                    Alias = "vsts_container_preview"
                 };
                 dockerContainer.Properties.Set("image", imageName);
                 Container = new ContainerInfo(dockerContainer);
             }
             else if (!string.IsNullOrEmpty(message.JobContainer))
             {
-                Container = new ContainerInfo(message.Resources.Containers.Single(x => string.Equals(x.Name, message.JobContainer, StringComparison.OrdinalIgnoreCase)));
+                Container = new ContainerInfo(message.Resources.Containers.Single(x => string.Equals(x.Alias, message.JobContainer, StringComparison.OrdinalIgnoreCase)));
             }
             else
             {

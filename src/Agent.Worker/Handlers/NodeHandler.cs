@@ -10,6 +10,34 @@ using Microsoft.VisualStudio.Services.Agent.Worker.Container;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
 {
+    [ServiceLocator(Default = typeof(AgentPluginHandler))]
+    public interface IAgentPluginHandler : IHandler
+    {
+        AgentPluginHandlerData Data { get; set; }
+    }
+
+    public sealed class AgentPluginHandler : Handler, IAgentPluginHandler
+    {
+        public AgentPluginHandlerData Data { get; set; }
+
+        public async Task RunAsync()
+        {
+            // Validate args.
+            Trace.Entering();
+            ArgUtil.NotNull(Data, nameof(Data));
+            ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
+            ArgUtil.NotNull(Inputs, nameof(Inputs));
+
+            ExecutionContext.Output(Inputs.Count.ToString());
+            foreach (var input in Inputs)
+            {
+                ExecutionContext.Output($"{input.Key}: {input.Value}");
+            }
+
+            await Task.Delay(5000);
+        }
+    }
+
     [ServiceLocator(Default = typeof(NodeHandler))]
     public interface INodeHandler : IHandler
     {

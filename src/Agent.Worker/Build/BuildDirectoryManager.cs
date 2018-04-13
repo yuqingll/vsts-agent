@@ -1,4 +1,5 @@
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
+using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using System;
 using System.IO;
@@ -8,6 +9,9 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using System.Security.Cryptography;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
@@ -19,6 +23,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             ServiceEndpoint endpoint,
             ISourceProvider sourceProvider);
 
+        TrackingConfig PrepareDirectory(IExecutionContext executionContext);
+
         void CreateDirectory(
             IExecutionContext executionContext,
             string description, string path,
@@ -29,6 +35,149 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
     {
         public string MaintenanceDescription => StringUtil.Loc("DeleteUnusedBuildDir");
         public Type ExtensionType => typeof(IMaintenanceServiceProvider);
+
+        public TrackingConfig PrepareDirectory(IExecutionContext executionContext)
+        {
+            // Validate parameters.
+            Trace.Entering();
+            ArgUtil.NotNull(executionContext, nameof(executionContext));
+            ArgUtil.NotNull(executionContext.Variables, nameof(executionContext.Variables));
+            ArgUtil.NotNull(executionContext.Repositories, nameof(executionContext.Repositories));
+
+            var trackingManager = HostContext.GetService<ITrackingManager>();
+
+            // Defer to the source provider to calculate the hash key.
+            Trace.Verbose("Calculating build directory hash key.");
+            string hashKey = GetBuildDirectoryHashKey(executionContext);
+            Trace.Verbose($"Hash key: {hashKey}");
+
+            // Load the existing tracking file if one already exists.
+            string trackingFile = Path.Combine(
+                IOUtil.GetWorkPath(HostContext),
+                Constants.Build.Path.SourceRootMappingDirectory,
+                executionContext.Variables.System_CollectionId,
+                executionContext.Variables.System_DefinitionId,
+                Constants.Build.Path.TrackingConfigFile);
+            Trace.Verbose($"Loading tracking config if exists: {trackingFile}");
+            TrackingConfigBase existingConfig = trackingManager.LoadIfExists(executionContext, trackingFile);
+
+            // Check if the build needs to be garbage collected. If the hash key
+            // has changed, then the existing build directory cannot be reused.
+            TrackingConfigBase garbageConfig = null;
+            if (existingConfig != null
+                && !string.Equals(existingConfig.HashKey, hashKey, StringComparison.OrdinalIgnoreCase))
+            {
+                // Just store a reference to the config for now. It can safely be
+                // marked for garbage collection only after the new build directory
+                // config has been created.
+                Trace.Verbose($"Hash key from existing tracking config does not match. Existing key: {existingConfig.HashKey}");
+                garbageConfig = existingConfig;
+                existingConfig = null;
+            }
+
+            // Create a new tracking config if required.
+            TrackingConfig newConfig;
+            if (existingConfig == null)
+            {
+                Trace.Verbose("Creating a new tracking config file.");
+                newConfig = trackingManager.Create(
+                    executionContext,
+                    hashKey,
+                    trackingFile);
+                ArgUtil.NotNull(newConfig, nameof(newConfig));
+            }
+            else
+            {
+                // Convert legacy format to the new format if required.
+                newConfig = ConvertToNewFormat(executionContext, existingConfig);
+
+                // Update repositories tracking information for each repository
+                trackingManager.UpdateRepositories(executionContext, newConfig);
+
+                // For existing tracking config files, update the job run properties.
+                Trace.Verbose("Updating job run properties.");
+                trackingManager.UpdateJobRunProperties(executionContext, newConfig, trackingFile);
+            }
+
+            // Mark the old configuration for garbage collection.
+            if (garbageConfig != null)
+            {
+                Trace.Verbose("Marking existing config for garbage collection.");
+                trackingManager.MarkForGarbageCollection(executionContext, garbageConfig);
+            }
+
+            // Prepare the build directory.
+            // There are 2 ways to provide build directory clean policy.
+            //     1> set definition variable build.clean or agent.clean.buildDirectory. (on-prem user need to use this, since there is no Web UI in TFS 2016)
+            //     2> select source clean option in definition repository tab. (VSTS will have this option in definition designer UI)
+            BuildCleanOption overallCleanOption = GetBuildDirectoryCleanOption(executionContext, executionContext.Repositories.Single(x => x.Alias == "self"));
+
+            CreateDirectory(
+                executionContext,
+                description: "build directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory),
+                deleteExisting: overallCleanOption == BuildCleanOption.All);
+            CreateDirectory(
+                executionContext,
+                description: "binaries directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.BinariesDirectory),
+                deleteExisting: overallCleanOption == BuildCleanOption.Binary);
+            CreateDirectory(
+                executionContext,
+                description: "artifacts directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.ArtifactsDirectory),
+                deleteExisting: true);
+            CreateDirectory(
+                executionContext,
+                description: "test results directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.TestResultsDirectory),
+                deleteExisting: true);
+
+            foreach (var repo in executionContext.Repositories)
+            {
+                BuildCleanOption cleanOption = GetBuildDirectoryCleanOption(executionContext, repo);
+                CreateDirectory(
+                    executionContext,
+                    description: "source directory",
+                    path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.SourcesDirectory),
+                    deleteExisting: cleanOption == BuildCleanOption.Source);
+            }
+
+            return newConfig;
+        }
+
+        private string GetBuildDirectoryHashKey(IExecutionContext executionContext)
+        {
+            // Validate parameters.
+            Trace.Entering();
+            ArgUtil.NotNull(executionContext, nameof(executionContext));
+            ArgUtil.NotNull(executionContext.Variables, nameof(executionContext.Variables));
+            ArgUtil.NotNull(executionContext.Repositories, nameof(executionContext.Repositories));
+
+            var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+            ArgUtil.NotNull(selfRepo, nameof(selfRepo));
+            ArgUtil.NotNull(selfRepo.Url, nameof(selfRepo.Url));
+
+            // Calculate the hash key.
+            const string Format = "{{{{ \r\n    \"system\" : \"build\", \r\n    \"collectionId\" = \"{0}\", \r\n    \"definitionId\" = \"{1}\", \r\n    \"repositoryUrl\" = \"{2}\", \r\n    \"sourceFolder\" = \"{{0}}\",\r\n    \"hashKey\" = \"{{1}}\"\r\n}}}}";
+            string hashInput = string.Format(
+                CultureInfo.InvariantCulture,
+                Format,
+                executionContext.Variables.System_CollectionId,
+                executionContext.Variables.System_DefinitionId,
+                selfRepo.Url.AbsoluteUri);
+            using (SHA1 sha1Hash = SHA1.Create())
+            {
+                byte[] data = sha1Hash.ComputeHash(Encoding.UTF8.GetBytes(hashInput));
+                StringBuilder hexString = new StringBuilder();
+                for (int i = 0; i < data.Length; i++)
+                {
+                    hexString.Append(data[i].ToString("x2"));
+                }
+
+                return hexString.ToString();
+            }
+        }
 
         public TrackingConfig PrepareDirectory(
             IExecutionContext executionContext,
@@ -45,7 +194,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
             // Defer to the source provider to calculate the hash key.
             Trace.Verbose("Calculating build directory hash key.");
-            string hashKey = sourceProvider.GetBuildDirectoryHashKey(executionContext, endpoint);
+            string hashKey = sourceProvider.GetBuildDirectoryHashKey(executionContext, endpoint.Url);
             Trace.Verbose($"Hash key: {hashKey}");
 
             // Load the existing tracking file if one already exists.
@@ -283,6 +432,57 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         private TrackingConfig ConvertToNewFormat(
             IExecutionContext executionContext,
+            TrackingConfigBase config)
+        {
+            Trace.Entering();
+
+            // If it's already in the new format, return it.
+            TrackingConfig newConfig = config as TrackingConfig;
+            if (newConfig != null)
+            {
+                return newConfig;
+            }
+
+            // Delete the legacy artifact/staging directories.
+            LegacyTrackingConfig legacyConfig = config as LegacyTrackingConfig;
+            DeleteDirectory(
+                executionContext,
+                description: "legacy artifacts directory",
+                path: Path.Combine(legacyConfig.BuildDirectory, Constants.Build.Path.LegacyArtifactsDirectory));
+            DeleteDirectory(
+                executionContext,
+                description: "legacy staging directory",
+                path: Path.Combine(legacyConfig.BuildDirectory, Constants.Build.Path.LegacyStagingDirectory));
+
+            var selfRepoName = executionContext.Repositories.Single(x => x.Alias == "self").Properties.Get<string>("name");
+            // Determine the source directory name. Check if the directory is named "s" already.
+            // Convert the source directory to be named "s" if there is a problem with the old name.
+            string sourcesDirectoryNameOnly = Constants.Build.Path.SourcesDirectory;
+            if (!Directory.Exists(Path.Combine(legacyConfig.BuildDirectory, sourcesDirectoryNameOnly))
+                && !String.Equals(selfRepoName, Constants.Build.Path.ArtifactsDirectory, StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(selfRepoName, Constants.Build.Path.LegacyArtifactsDirectory, StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(selfRepoName, Constants.Build.Path.LegacyStagingDirectory, StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(selfRepoName, Constants.Build.Path.TestResultsDirectory, StringComparison.OrdinalIgnoreCase)
+                && !selfRepoName.Contains("\\")
+                && !selfRepoName.Contains("/")
+                && Directory.Exists(Path.Combine(legacyConfig.BuildDirectory, selfRepoName)))
+            {
+                sourcesDirectoryNameOnly = selfRepoName;
+            }
+
+            // Convert to the new format.
+            newConfig = new TrackingConfig(
+                executionContext,
+                legacyConfig,
+                sourcesDirectoryNameOnly,
+                // The legacy artifacts directory has been deleted at this point - see above - so
+                // switch the configuration to using the new naming scheme.
+                useNewArtifactsDirectoryName: true);
+            return newConfig;
+        }
+
+        private TrackingConfig ConvertToNewFormat(
+            IExecutionContext executionContext,
             ServiceEndpoint endpoint,
             TrackingConfigBase config)
         {
@@ -359,6 +559,45 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 executionContext.Debug($"Deleting {description}: '{path}'");
                 IOUtil.DeleteDirectory(path, executionContext.CancellationToken);
             }
+        }
+
+        // Prefer variable over endpoint data when get build directory clean option.
+        // Prefer agent.clean.builddirectory over build.clean when use variable
+        // available value for build.clean or agent.clean.builddirectory:
+        //      Delete entire build directory if build.clean=all is set.
+        //      Recreate binaries dir if clean=binary is set.
+        //      Recreate source dir if clean=src is set.
+        private BuildCleanOption GetBuildDirectoryCleanOption(IExecutionContext executionContext, Pipelines.RepositoryResource repository)
+        {
+            BuildCleanOption? cleanOption = executionContext.Variables.Build_Clean;
+            if (cleanOption != null)
+            {
+                return cleanOption.Value;
+            }
+
+            bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
+            if (clean)
+            {
+                string cleanOptionData = repository.Properties.Get<string>(EndpointData.CleanOptions);
+                RepositoryCleanOptions? cleanOptionFromEndpoint = EnumUtil.TryParse<RepositoryCleanOptions>(cleanOptionData);
+                if (cleanOptionFromEndpoint != null)
+                {
+                    if (cleanOptionFromEndpoint == RepositoryCleanOptions.AllBuildDir)
+                    {
+                        return BuildCleanOption.All;
+                    }
+                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceDir)
+                    {
+                        return BuildCleanOption.Source;
+                    }
+                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceAndOutput)
+                    {
+                        return BuildCleanOption.Binary;
+                    }
+                }
+            }
+
+            return BuildCleanOption.None;
         }
 
         // Prefer variable over endpoint data when get build directory clean option.

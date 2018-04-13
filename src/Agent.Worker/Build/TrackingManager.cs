@@ -1,4 +1,5 @@
 ﻿using Microsoft.TeamFoundation.DistributedTask.WebApi;
+using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using Newtonsoft.Json;
 using System;
@@ -20,9 +21,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             string file,
             bool overrideBuildDirectory);
 
+        TrackingConfig Create(
+            IExecutionContext executionContext,
+            string hashKey,
+            string file);
+
         TrackingConfigBase LoadIfExists(IExecutionContext executionContext, string file);
 
         void MarkForGarbageCollection(IExecutionContext executionContext, TrackingConfigBase config);
+
+        void UpdateRepositories(IExecutionContext executionContext, TrackingConfig config);
 
         void UpdateJobRunProperties(IExecutionContext executionContext, TrackingConfig config, string file);
 
@@ -37,6 +45,190 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
     public sealed class TrackingManager : AgentService, ITrackingManager
     {
+        public TrackingConfig Create(
+            IExecutionContext executionContext,
+            string hashKey,
+            string file)
+        {
+            Trace.Entering();
+
+            // Get or create the top-level tracking config.
+            TopLevelTrackingConfig topLevelConfig;
+            string topLevelFile = Path.Combine(
+                IOUtil.GetWorkPath(HostContext),
+                Constants.Build.Path.SourceRootMappingDirectory,
+                Constants.Build.Path.TopLevelTrackingConfigFile);
+            Trace.Verbose($"Loading top-level tracking config if exists: {topLevelFile}");
+            if (!File.Exists(topLevelFile))
+            {
+                topLevelConfig = new TopLevelTrackingConfig();
+            }
+            else
+            {
+                topLevelConfig = JsonConvert.DeserializeObject<TopLevelTrackingConfig>(File.ReadAllText(topLevelFile));
+                if (topLevelConfig == null)
+                {
+                    executionContext.Warning($"Rebuild corruptted top-level tracking configure file {topLevelFile}.");
+                    // save the corruptted file in case we need to investigate more.
+                    File.Copy(topLevelFile, $"{topLevelFile}.corruptted", true);
+
+                    topLevelConfig = new TopLevelTrackingConfig();
+                    DirectoryInfo workDir = new DirectoryInfo(HostContext.GetDirectory(WellKnownDirectory.Work));
+
+                    foreach (var dir in workDir.EnumerateDirectories())
+                    {
+                        // we scan the entire _work directory and find the directory with the highest integer number.
+                        if (int.TryParse(dir.Name, NumberStyles.Integer, CultureInfo.InvariantCulture, out int lastBuildNumber) &&
+                            lastBuildNumber > topLevelConfig.LastBuildDirectoryNumber)
+                        {
+                            topLevelConfig.LastBuildDirectoryNumber = lastBuildNumber;
+                        }
+                    }
+                }
+            }
+
+            // Determine the build directory.
+            var configurationStore = HostContext.GetService<IConfigurationStore>();
+            AgentSettings settings = configurationStore.GetSettings();
+            if (settings.IsHosted && (executionContext.Repositories.Any(x => x.Type == "TfsVersionControl")))
+            {
+                // This should only occur during hosted builds. This was added due to TFVC.
+                // TFVC does not allow a local path for a single machine to be mapped in multiple
+                // workspaces. The machine name for a hosted images is not unique.
+                //
+                // So if a customer is running two hosted builds at the same time, they could run
+                // into the local mapping conflict.
+                //
+                // The workaround is to force the build directory to be different across all concurrent
+                // hosted builds (for TFVC). The agent ID will be unique across all concurrent hosted
+                // builds so that can safely be used as the build directory.
+                ArgUtil.Equal(default(int), topLevelConfig.LastBuildDirectoryNumber, nameof(topLevelConfig.LastBuildDirectoryNumber));
+                topLevelConfig.LastBuildDirectoryNumber = settings.AgentId;
+            }
+            else
+            {
+                topLevelConfig.LastBuildDirectoryNumber++;
+            }
+
+            // Update the top-level tracking config.
+            topLevelConfig.LastBuildDirectoryCreatedOn = DateTimeOffset.Now;
+            WriteToFile(topLevelFile, topLevelConfig);
+
+            // Create the new tracking config.
+            TrackingConfig config = new TrackingConfig(
+                executionContext,
+                topLevelConfig.LastBuildDirectoryNumber,
+                hashKey);
+            WriteToFile(file, config);
+            return config;
+        }
+
+        public void UpdateRepositories(
+            IExecutionContext executionContext,
+            TrackingConfig config)
+        {
+            // first time load existing tracking file.
+            if (config.Repositories == null || config.Repositories.Count == 0)
+            {
+                if (executionContext.Repositories.Count > 1)
+                {
+                    // move current /s to /s/self since we have more repositories need to stored
+                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                    var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory);
+                    var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
+                    var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
+                    try
+                    {
+                        Directory.Move(currentSourceDirectory, stagingDirectory);
+                        Directory.Move(stagingDirectory, newSourceDirectory);
+                    }
+                    catch (Exception ex)
+                    {
+                        // if we can't move the folder and we can't delete the folder, just fail the job.
+                        IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
+                    }
+                    finally
+                    {
+                        foreach (var repo in executionContext.Repositories)
+                        {
+                            config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                            {
+                                RepositoryType = repo.Type,
+                                RepositoryUrl = repo.Url.AbsoluteUri,
+                                SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
+                            };
+                        }
+                    }
+                }
+                else
+                {
+                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                    config.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
+                    {
+                        RepositoryType = selfRepo.Type,
+                        RepositoryUrl = selfRepo.Url.AbsoluteUri,
+                        SourceDirectory = config.SourcesDirectory
+                    };
+                }
+            }
+            else if (config.Repositories.Count == 1)
+            {
+                if (executionContext.Repositories.Count > 1)
+                {
+                    // move current /s to /s/self since we have more repositories need to stored
+                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                    var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory);
+                    var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
+                    var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
+                    try
+                    {
+                        Directory.Move(currentSourceDirectory, stagingDirectory);
+                        Directory.Move(stagingDirectory, newSourceDirectory);
+                    }
+                    catch (Exception ex)
+                    {
+                        // if we can't move the folder and we can't delete the folder, just fail the job.
+                        IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
+                    }
+                    finally
+                    {
+                        foreach (var repo in executionContext.Repositories)
+                        {
+                            config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                            {
+                                RepositoryType = repo.Type,
+                                RepositoryUrl = repo.Url.AbsoluteUri,
+                                SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
+                            };
+                        }
+                    }
+                }
+                else
+                {
+                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                    config.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
+                    {
+                        RepositoryType = selfRepo.Type,
+                        RepositoryUrl = selfRepo.Url.AbsoluteUri,
+                        SourceDirectory = config.SourcesDirectory
+                    };
+                }
+            }
+            else
+            {
+                // we already have multiple repositories
+                foreach (var repo in executionContext.Repositories)
+                {
+                    config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                    {
+                        RepositoryType = repo.Type,
+                        RepositoryUrl = repo.Url.AbsoluteUri,
+                        SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
+                    };
+                }
+            }
+        }
+
         public TrackingConfig Create(
             IExecutionContext executionContext,
             ServiceEndpoint endpoint,
