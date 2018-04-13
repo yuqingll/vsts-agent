@@ -46,14 +46,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 {
                     AgentPlugin = new AgentPluginHandlerData()
                     {
-                        Target = "GetSource"
+                        Target = "Agent.RepositoryPlugin.dll",
+                        EntryPoint = "AgentRepositoryCheckoutPlugin"
                     }
                 },
                 PostJobExecution = new ExecutionData()
                 {
                     AgentPlugin = new AgentPluginHandlerData()
                     {
-                        Target = "Cleanup"
+                        Target = "Agent.RepositoryPlugin.dll",
+                        EntryPoint = "AgentRepositoryCleanupPlugin"
                     }
                 }
             }
@@ -352,6 +354,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
+        [JsonIgnore]
         public AgentPluginHandlerData AgentPlugin
         {
             get

@@ -20,20 +20,34 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         public override IStep GetExtensionPreJobStep(IExecutionContext jobContext)
         {
-            return new JobExtensionRunner(
-                runAsync: GetSourceAsync,
-                condition: ExpressionManager.Succeeded,
-                displayName: StringUtil.Loc("GetSources"),
-                data: null);
+            if (SourceEndpoint != null && SourceProvider != null)
+            {
+                return new JobExtensionRunner(
+                    runAsync: GetSourceAsync,
+                    condition: ExpressionManager.Succeeded,
+                    displayName: StringUtil.Loc("GetSources"),
+                    data: null);
+            }
+            else
+            {
+                return null;
+            }
         }
 
         public override IStep GetExtensionPostJobStep(IExecutionContext jobContext)
         {
-            return new JobExtensionRunner(
-                runAsync: PostJobCleanupAsync,
-                condition: ExpressionManager.Always,
-                displayName: StringUtil.Loc("Cleanup"),
-                data: null);
+            if (SourceEndpoint != null && SourceProvider != null)
+            {
+                return new JobExtensionRunner(
+                    runAsync: PostJobCleanupAsync,
+                    condition: ExpressionManager.Always,
+                    displayName: StringUtil.Loc("Cleanup"),
+                    data: null);
+            }
+            else
+            {
+                return null;
+            }
         }
 
         // 1. use source provide to solve path, if solved result is rooted, return full path.

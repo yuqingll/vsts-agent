@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
+using Microsoft.VisualStudio.Services.Agent.PluginCore;
 
 namespace Microsoft.VisualStudio.Services.Agent.PluginHost
 {
@@ -16,29 +17,31 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
         {
             Console.CancelKeyPress += Console_CancelKeyPress;
             AssemblyLoadContext.Default.Resolving += ResolveAssembly;
+
+            AgentPluginExecutionContext executionContext = new AgentPluginExecutionContext();
             //TaskLib taskContext = new TaskLib();
             //taskContext.Initialize();
             try
             {
-                // ArgUtil.NotNull(args, nameof(args));
-                // ArgUtil.Equal(2, args.Length, nameof(args.Length));
+                ArgUtil.NotNull(args, nameof(args));
+                ArgUtil.Equal(2, args.Length, nameof(args.Length));
 
                 assemblyPath = args[0];
+                ArgUtil.File(assemblyPath, nameof(assemblyPath));
+
                 string entryPoint = args[1];
-                // taskContext.Debug(assemblyPath);
-                // taskContext.Debug(typeName);
+                ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
 
-                // ArgUtil.File(assemblyPath, nameof(assemblyPath));
-                // ArgUtil.NotNullOrEmpty(typeName, nameof(typeName));
+                executionContext.Debug(assemblyPath);
+                executionContext.Debug(entryPoint);
 
-                Assembly taskAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
-                //ArgUtil.NotNull(taskAssembly, nameof(taskAssembly));
+                Assembly pluginAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
+                ArgUtil.NotNull(pluginAssembly, nameof(pluginAssembly));
 
-                // Type type = taskAssembly.GetType(typeName, throwOnError: true);
-                // var vstsTask = Activator.CreateInstance(type) as ITask;
-                // ArgUtil.NotNull(vstsTask, nameof(vstsTask));
+                IAgentPlugin agentPlugin = pluginAssembly.CreateInstance($"{pluginAssembly.GetName().Name}.{entryPoint}", true) as IAgentPlugin;
+                ArgUtil.NotNull(agentPlugin, nameof(agentPlugin));
 
-                // vstsTask.RunAsync(taskContext, tokenSource.Token).GetAwaiter().GetResult();
+                agentPlugin.RunAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {

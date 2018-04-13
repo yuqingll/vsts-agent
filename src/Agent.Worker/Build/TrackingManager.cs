@@ -130,6 +130,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             // first time load existing tracking file.
             if (config.Repositories == null || config.Repositories.Count == 0)
             {
+                config.Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+
                 if (executionContext.Repositories.Count > 1)
                 {
                     // move current /s to /s/self since we have more repositories need to stored
