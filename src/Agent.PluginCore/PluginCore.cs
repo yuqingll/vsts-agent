@@ -26,12 +26,12 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
     public class AgentCertificateSettings
     {
-        public bool SkipServerCertificateValidation { get; }
-        public string CACertificateFile { get; }
-        public string ClientCertificateFile { get; }
-        public string ClientCertificatePrivateKeyFile { get; }
-        public string ClientCertificateArchiveFile { get; }
-        public string ClientCertificatePassword { get; }
+        public bool SkipServerCertificateValidation { get; set; }
+        public string CACertificateFile { get; set; }
+        public string ClientCertificateFile { get; set; }
+        public string ClientCertificatePrivateKeyFile { get; set; }
+        public string ClientCertificateArchiveFile { get; set; }
+        public string ClientCertificatePassword { get; set; }
     }
 
     public class AgentRuntimeOptions
@@ -41,10 +41,10 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
     public class AgentWebProxySettings
     {
-        public string ProxyAddress { get; }
-        public string ProxyUsername { get; }
-        public string ProxyPassword { get; }
-        public List<string> ProxyBypassList { get; }
+        public string ProxyAddress { get; set; }
+        public string ProxyUsername { get; set; }
+        public string ProxyPassword { get; set; }
+        public List<string> ProxyBypassList { get; set; }
 
         private readonly List<Regex> _regExBypassList = new List<Regex>();
         private bool _initialized = false;
@@ -111,9 +111,61 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             this.Repositories = new List<Pipelines.RepositoryResource>();
         }
 
-        public AgentCertificateSettings Certificates { get; set; }
+        public AgentCertificateSettings GetCertConfiguration()
+        {
+            bool skipCertValidation = StringUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("Agent.SkipCertValidation")?.Value);
+            string caFile = this.Variables.GetValueOrDefault("Agent.CAInfo")?.Value;
+            string clientCertFile = this.Variables.GetValueOrDefault("Agent.ClientCert")?.Value;
+
+            if (!string.IsNullOrEmpty(caFile) || !string.IsNullOrEmpty(clientCertFile) || skipCertValidation)
+            {
+                var certConfig = new AgentCertificateSettings();
+                certConfig.SkipServerCertificateValidation = skipCertValidation;
+                certConfig.CACertificateFile = caFile;
+
+                if (!string.IsNullOrEmpty(clientCertFile))
+                {
+                    certConfig.ClientCertificateFile = clientCertFile;
+                    string clientCertKey = this.Variables.GetValueOrDefault("Agent.ClientCertKey")?.Value;
+                    string clientCertArchive = this.Variables.GetValueOrDefault("Agent.ClientCertArchive")?.Value;
+                    string clientCertPassword = this.Variables.GetValueOrDefault("Agent.ClientCertPassword")?.Value;
+
+                    certConfig.ClientCertificatePrivateKeyFile = clientCertKey;
+                    certConfig.ClientCertificateArchiveFile = clientCertArchive;
+                    certConfig.ClientCertificatePassword = clientCertPassword;
+                }
+
+                return certConfig;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        public AgentWebProxySettings GetProxyConfiguration()
+        {
+            string proxyUrl = this.Variables.GetValueOrDefault("Agent.ProxyUrl")?.Value;
+            if (!string.IsNullOrEmpty(proxyUrl))
+            {
+                string proxyUsername = this.Variables.GetValueOrDefault("Agent.ProxyUsername")?.Value;
+                string proxyPassword = this.Variables.GetValueOrDefault("Agent.ProxyPassword")?.Value;
+                List<string> proxyBypassHosts = StringUtil.ConvertFromJson<List<string>>(this.Variables.GetValueOrDefault("Agent.ProxyBypassList")?.Value ?? "[]");
+                return new AgentWebProxySettings()
+                {
+                    ProxyAddress = proxyUrl,
+                    ProxyUsername = proxyUsername,
+                    ProxyPassword = proxyPassword,
+                    ProxyBypassList = proxyBypassHosts,
+                };
+            }
+            else
+            {
+                return null;
+            }
+        }
+
         public AgentRuntimeOptions RuntimeOptions { get; set; }
-        public AgentWebProxySettings ProxySettings { get; set; }
         public List<ServiceEndpoint> Endpoints { get; set; }
         public List<Pipelines.RepositoryResource> Repositories { get; set; }
         public Dictionary<string, VariableValue> Variables { get; set; }

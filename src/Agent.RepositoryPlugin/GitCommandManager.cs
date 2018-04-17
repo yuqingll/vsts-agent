@@ -17,36 +17,36 @@ namespace Agent.RepositoryPlugin
 #else
         private static readonly Encoding s_encoding = null;
 #endif
-        private string _gitHttpUserAgentEnv = null;
-        private string _gitPath = null;
-        private Version _gitVersion = null;
-        private string _gitLfsPath = null;
-        private Version _gitLfsVersion = null;
+        private string gitHttpUserAgentEnv = null;
+        private string gitPath = null;
+        private Version gitVersion = null;
+        private string gitLfsPath = null;
+        private Version gitLfsVersion = null;
 
         public bool EnsureGitVersion(Version requiredVersion, bool throwOnNotMatch)
         {
-            ArgUtil.NotNull(_gitPath, nameof(_gitPath));
-            ArgUtil.NotNull(_gitVersion, nameof(_gitVersion));
+            ArgUtil.NotNull(gitPath, nameof(gitPath));
+            ArgUtil.NotNull(gitVersion, nameof(gitVersion));
 
-            if (_gitVersion < requiredVersion && throwOnNotMatch)
+            if (gitVersion < requiredVersion && throwOnNotMatch)
             {
-                throw new NotSupportedException($"MinRequiredGitVersion {requiredVersion}, {_gitPath}, {_gitVersion}");
+                throw new NotSupportedException($"MinRequiredGitVersion {requiredVersion}, {gitPath}, {gitVersion}");
             }
 
-            return _gitVersion >= requiredVersion;
+            return gitVersion >= requiredVersion;
         }
 
         public bool EnsureGitLFSVersion(Version requiredVersion, bool throwOnNotMatch)
         {
-            ArgUtil.NotNull(_gitLfsPath, nameof(_gitLfsPath));
-            ArgUtil.NotNull(_gitLfsVersion, nameof(_gitLfsVersion));
+            ArgUtil.NotNull(gitLfsPath, nameof(gitLfsPath));
+            ArgUtil.NotNull(gitLfsVersion, nameof(gitLfsVersion));
 
-            if (_gitLfsVersion < requiredVersion && throwOnNotMatch)
+            if (gitLfsVersion < requiredVersion && throwOnNotMatch)
             {
-                throw new NotSupportedException($"MinRequiredGitLfsVersion {requiredVersion} {_gitLfsPath} {_gitLfsVersion}");
+                throw new NotSupportedException($"MinRequiredGitLfsVersion {requiredVersion} {gitLfsPath} {gitLfsVersion}");
             }
 
-            return _gitLfsVersion >= requiredVersion;
+            return gitLfsVersion >= requiredVersion;
         }
 
         public static string PrependPath(string path, string currentPath)
@@ -81,39 +81,39 @@ namespace Agent.RepositoryPlugin
             if (useBuiltInGit)
             {
 #if OS_WINDOWS
-                _gitPath = Path.Combine(context.Variables.GetValueOrDefault("agent.homedirectory").Value, "externals", "git", "cmd", $"git.exe");
+                gitPath = Path.Combine(context.Variables.GetValueOrDefault("agent.homedirectory")?.Value, "externals", "git", "cmd", $"git.exe");
 
                 // Prepend the PATH.
-                context.Output($"Prepending0WithDirectoryContaining1 PATH {Path.GetFileName(_gitPath)}");
-                PrependPath(Path.GetDirectoryName(_gitPath));
+                context.Output($"Prepending0WithDirectoryContaining1 PATH {Path.GetFileName(gitPath)}");
+                PrependPath(Path.GetDirectoryName(gitPath));
                 context.Debug($"PATH: '{Environment.GetEnvironmentVariable("PATH")}'");
 #else
                 // There is no built-in git for OSX/Linux
-                _gitPath = null;
+                gitPath = null;
 #endif
             }
             else
             {
-                _gitPath = WhichUtil.Which("git", require: true);
+                gitPath = WhichUtil.Which("git", require: true);
             }
 
-            ArgUtil.File(_gitPath, nameof(_gitPath));
+            ArgUtil.File(gitPath, nameof(gitPath));
 
             // Get the Git version.    
-            _gitVersion = await GitVersion(context);
-            ArgUtil.NotNull(_gitVersion, nameof(_gitVersion));
-            context.Debug($"Detect git version: {_gitVersion.ToString()}.");
+            gitVersion = await GitVersion(context);
+            ArgUtil.NotNull(gitVersion, nameof(gitVersion));
+            context.Debug($"Detect git version: {gitVersion.ToString()}.");
 
             // Resolve the location of git-lfs.
             // This should be best effort since checkout lfs objects is an option.
             // We will check and ensure git-lfs version later
-            _gitLfsPath = WhichUtil.Which("git-lfs", require: false);
+            gitLfsPath = WhichUtil.Which("git-lfs", require: false);
 
             // Get the Git-LFS version if git-lfs exist in %PATH%.
-            if (!string.IsNullOrEmpty(_gitLfsPath))
+            if (!string.IsNullOrEmpty(gitLfsPath))
             {
-                _gitLfsVersion = await GitLfsVersion(context);
-                context.Debug($"Detect git-lfs version: '{_gitLfsVersion?.ToString() ?? string.Empty}'.");
+                gitLfsVersion = await GitLfsVersion(context);
+                context.Debug($"Detect git-lfs version: '{gitLfsVersion?.ToString() ?? string.Empty}'.");
             }
 
             // required 2.0, all git operation commandline args need min git version 2.0
@@ -124,12 +124,12 @@ namespace Agent.RepositoryPlugin
             Version recommendGitVersion = new Version(2, 9);
             if (!EnsureGitVersion(recommendGitVersion, throwOnNotMatch: false))
             {
-                context.Output($"UpgradeToLatestGit  {recommendGitVersion}, {_gitVersion}");
+                context.Output($"UpgradeToLatestGit  {recommendGitVersion}, {gitVersion}");
             }
 
             // Set the user agent.
-            _gitHttpUserAgentEnv = $"git/{_gitVersion.ToString()} (vsts-agent-git/{context.Variables.GetValueOrDefault("agent.version")?.Value ?? string.Empty})";
-            context.Debug($"Set git useragent to: {_gitHttpUserAgentEnv}.");
+            gitHttpUserAgentEnv = $"git/{gitVersion.ToString()} (vsts-agent-git/{context.Variables.GetValueOrDefault("agent.version")?.Value ?? string.Empty})";
+            context.Debug($"Set git useragent to: {gitHttpUserAgentEnv}.");
         }
 
         // git init <LocalDir>
@@ -187,7 +187,7 @@ namespace Agent.RepositoryPlugin
 
             // Git 2.7 support report checkout progress to stderr during stdout/err redirect.
             string options;
-            if (_gitVersion >= new Version(2, 7))
+            if (gitVersion >= new Version(2, 7))
             {
                 options = StringUtil.Format("--progress --force {0}", committishOrBranchSpec);
             }
@@ -388,7 +388,7 @@ namespace Agent.RepositoryPlugin
             context.Debug("Get git version.");
             Version version = null;
             List<string> outputStrings = new List<string>();
-            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory").Value, "version", null, outputStrings);
+            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory")?.Value, "version", null, outputStrings);
             context.Output($"{string.Join(Environment.NewLine, outputStrings)}");
             if (exitCode == 0)
             {
@@ -419,7 +419,7 @@ namespace Agent.RepositoryPlugin
             context.Debug("Get git-lfs version.");
             Version version = null;
             List<string> outputStrings = new List<string>();
-            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory").Value, "lfs version", null, outputStrings);
+            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory")?.Value, "lfs version", null, outputStrings);
             context.Output($"{string.Join(Environment.NewLine, outputStrings)}");
             if (exitCode == 0)
             {
@@ -461,7 +461,7 @@ namespace Agent.RepositoryPlugin
 
             return await processInvoker.ExecuteAsync(
                 workingDirectory: repoRoot,
-                fileName: _gitPath,
+                fileName: gitPath,
                 arguments: arg,
                 environment: GetGitEnvironmentVariables(context),
                 requireExitCodeZero: false,
@@ -499,7 +499,7 @@ namespace Agent.RepositoryPlugin
 
             return await processInvoker.ExecuteAsync(
                 workingDirectory: repoRoot,
-                fileName: _gitPath,
+                fileName: gitPath,
                 arguments: arg,
                 environment: GetGitEnvironmentVariables(context),
                 requireExitCodeZero: false,
@@ -525,7 +525,7 @@ namespace Agent.RepositoryPlugin
 
             return await processInvoker.ExecuteAsync(
                 workingDirectory: repoRoot,
-                fileName: _gitPath,
+                fileName: gitPath,
                 arguments: arg,
                 environment: GetGitEnvironmentVariables(context),
                 requireExitCodeZero: false,
@@ -540,9 +540,9 @@ namespace Agent.RepositoryPlugin
                 { "GIT_TERMINAL_PROMPT", "0" },
             };
 
-            if (!string.IsNullOrEmpty(_gitHttpUserAgentEnv))
+            if (!string.IsNullOrEmpty(gitHttpUserAgentEnv))
             {
-                gitEnv["GIT_HTTP_USER_AGENT"] = _gitHttpUserAgentEnv;
+                gitEnv["GIT_HTTP_USER_AGENT"] = gitHttpUserAgentEnv;
             }
 
             // Add the public variables.

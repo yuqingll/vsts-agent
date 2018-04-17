@@ -131,6 +131,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
 
             var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+            if (Repositories == null)
+            {
+                Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+            }
+
             Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
             {
                 RepositoryType = selfRepo.Type,
@@ -156,6 +161,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             ArtifactsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.ArtifactsDirectory);
             TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
             SourcesDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.SourcesDirectory);
+
+            if (Repositories == null)
+            {
+                Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+            }
 
             if (executionContext.Repositories.Count == 1)
             {

@@ -122,7 +122,7 @@ namespace Agent.RepositoryPlugin
         // we have to use http.extraheader option to provide auth header for on-prem tfs git
         public override void RequirementCheck(AgentPluginExecutionContext executionContext, Pipelines.RepositoryResource repository, GitCommandManager gitCommandManager)
         {
-            var selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetOrDefault("system.selfmanagegitcreds").Value);
+            var selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
             if (selfManageGitCreds)
             {
                 // Customer choose to own git creds by themselves, we don't have to worry about git version anymore.
@@ -225,8 +225,8 @@ namespace Agent.RepositoryPlugin
             bool checkoutNestedSubmodules = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutNestedSubmodules));
             bool acceptUntrustedCerts = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.AcceptUntrustedCertificates));
 
-            var agentCert = executionContext.Certificates;
-            acceptUntrustedCerts = acceptUntrustedCerts || agentCert.SkipServerCertificateValidation;
+            var agentCert = executionContext.GetCertConfiguration();
+            acceptUntrustedCerts = acceptUntrustedCerts || (agentCert?.SkipServerCertificateValidation ?? false);
 
             int fetchDepth = 0;
             if (!int.TryParse(repository.Properties.Get<string>(EndpointData.FetchDepth), out fetchDepth) || fetchDepth < 0)
@@ -257,10 +257,10 @@ namespace Agent.RepositoryPlugin
             // Determine which git will be use
             // On windows, we prefer the built-in portable git within the agent's externals folder, 
             // set system.prefergitfrompath=true can change the behavior, agent will find git.exe from %PATH%
-            var definitionSetting = executionContext.Variables.GetOrDefault("system.prefergitfrompath");
+            var definitionSetting = executionContext.Variables.GetValueOrDefault("system.prefergitfrompath");
             if (definitionSetting != null)
             {
-                preferGitFromPath = StringUtil.ConvertToBoolean(executionContext.Variables.GetOrDefault("system.prefergitfrompath").Value);
+                preferGitFromPath = StringUtil.ConvertToBoolean(definitionSetting.Value);
             }
             else
             {
@@ -272,7 +272,7 @@ namespace Agent.RepositoryPlugin
 #endif
 
             // Determine do we need to provide creds to git operation
-            _selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetOrDefault("system.selfmanagegitcreds").Value);
+            _selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
             if (_selfManageGitCreds)
             {
                 // Customer choose to own git creds by themselves.
@@ -327,8 +327,8 @@ namespace Agent.RepositoryPlugin
 
             // prepare credentail embedded urls
             _repositoryUrlWithCred = UrlUtil.GetCredentialEmbeddedUrl(repositoryUrl, username, password);
-            var agentProxy = executionContext.ProxySettings;
-            if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
+            var agentProxy = executionContext.GetProxyConfiguration();
+            if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
             {
                 _proxyUrlWithCred = UrlUtil.GetCredentialEmbeddedUrl(new Uri(agentProxy.ProxyAddress), agentProxy.ProxyUsername, agentProxy.ProxyPassword);
 
@@ -346,9 +346,9 @@ namespace Agent.RepositoryPlugin
             }
 
             // prepare askpass for client cert private key
-            var systemConnection = executionContext.Endpoints.Single(x => x.Name == "systemconnection");
+            var systemConnection = executionContext.Endpoints.Single(x => x.Name == "SystemVssConnection");
             var serverUrl = systemConnection.Url;
-            if (Uri.Compare(repositoryUrl, serverUrl, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
+            if (agentCert != null && Uri.Compare(repositoryUrl, serverUrl, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
             {
                 if (!string.IsNullOrEmpty(agentCert.CACertificateFile))
                 {
@@ -580,7 +580,7 @@ namespace Agent.RepositoryPlugin
                 }
 
                 // Prepare proxy config for fetch.
-                if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
+                if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                 {
                     executionContext.Debug($"Config proxy server '{agentProxy.ProxyAddress}' for git fetch.");
                     ArgUtil.NotNullOrEmpty(_proxyUrlWithCredString, nameof(_proxyUrlWithCredString));
@@ -751,7 +751,7 @@ namespace Agent.RepositoryPlugin
                     }
 
                     // Prepare proxy config for submodule update.
-                    if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
+                    if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                     {
                         executionContext.Debug($"Config proxy server '{agentProxy.ProxyAddress}' for git submodule update.");
                         ArgUtil.NotNullOrEmpty(_proxyUrlWithCredString, nameof(_proxyUrlWithCredString));
@@ -827,7 +827,7 @@ namespace Agent.RepositoryPlugin
                 if (exposeCred)
                 {
                     // save proxy setting to git config.
-                    if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
+                    if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                     {
                         executionContext.Debug($"Save proxy config for proxy server '{agentProxy.ProxyAddress}' into git config.");
                         ArgUtil.NotNullOrEmpty(_proxyUrlWithCredString, nameof(_proxyUrlWithCredString));
