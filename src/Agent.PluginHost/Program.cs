@@ -18,34 +18,35 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
             Console.CancelKeyPress += Console_CancelKeyPress;
             AssemblyLoadContext.Default.Resolving += ResolveAssembly;
 
-            AgentPluginExecutionContext executionContext = new AgentPluginExecutionContext();
-            //TaskLib taskContext = new TaskLib();
-            //taskContext.Initialize();
+            ArgUtil.NotNull(args, nameof(args));
+            ArgUtil.Equal(2, args.Length, nameof(args.Length));
+
+            assemblyPath = args[0];
+            ArgUtil.File(assemblyPath, nameof(assemblyPath));
+
+            string entryPoint = args[1];
+            ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
+
+            var serializedContext = Console.ReadLine();
+            AgentPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentPluginExecutionContext>(serializedContext);
+
+            executionContext.Debug(assemblyPath);
+            executionContext.Debug(entryPoint);
+            executionContext.Debug(serializedContext);
+
+            Assembly pluginAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
+            ArgUtil.NotNull(pluginAssembly, nameof(pluginAssembly));
+
+            IAgentPlugin agentPlugin = pluginAssembly.CreateInstance($"{pluginAssembly.GetName().Name}.{entryPoint}", true) as IAgentPlugin;
+            ArgUtil.NotNull(agentPlugin, nameof(agentPlugin));
+
             try
             {
-                ArgUtil.NotNull(args, nameof(args));
-                ArgUtil.Equal(2, args.Length, nameof(args.Length));
-
-                assemblyPath = args[0];
-                ArgUtil.File(assemblyPath, nameof(assemblyPath));
-
-                string entryPoint = args[1];
-                ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
-
-                executionContext.Debug(assemblyPath);
-                executionContext.Debug(entryPoint);
-
-                Assembly pluginAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
-                ArgUtil.NotNull(pluginAssembly, nameof(pluginAssembly));
-
-                IAgentPlugin agentPlugin = pluginAssembly.CreateInstance($"{pluginAssembly.GetName().Name}.{entryPoint}", true) as IAgentPlugin;
-                ArgUtil.NotNull(agentPlugin, nameof(agentPlugin));
-
                 agentPlugin.RunAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.ToString());
+                executionContext.Error(ex);
                 // if (ex.InnerException != null)
                 // {
                 //     taskContext.Debug(ex.InnerException.ToString());

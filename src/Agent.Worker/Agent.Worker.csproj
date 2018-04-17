@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Microsoft.VisualStudio.Services.Agent\Microsoft.VisualStudio.Services.Agent.csproj" />
+    <ProjectReference Include="..\Agent.PluginCore\Agent.PluginCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

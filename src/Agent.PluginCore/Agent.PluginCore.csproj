@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="vss-api-netcore" Version="0.5.62-private" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="4.4.0" />
   </ItemGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">

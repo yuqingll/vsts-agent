@@ -3,10 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
 using System;
 using Newtonsoft.Json.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.Services.Agent.Worker.Container;
+using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Microsoft.TeamFoundation.DistributedTask.WebApi;
+using Microsoft.VisualStudio.Services.WebApi;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
 {
@@ -29,32 +33,47 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
         {
             // Validate args.
             Trace.Entering();
-            ArgUtil.NotNull(Data, nameof(Data));
-            ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
-            ArgUtil.NotNull(Inputs, nameof(Inputs));
+            Util.ArgUtil.NotNull(Data, nameof(Data));
+            Util.ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
+            Util.ArgUtil.NotNull(Inputs, nameof(Inputs));
 
             // Resolve the target assembly.
             string target = Data.Target;
-            ArgUtil.NotNullOrEmpty(target, nameof(target));
+            Util.ArgUtil.NotNullOrEmpty(target, nameof(target));
             if (!string.Equals(target, AgentPluginWhiteLists.RepositoryPlugin, StringComparison.OrdinalIgnoreCase))
             {
                 throw new NotSupportedException(target);
             }
             target = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), target);
-            ArgUtil.File(target, nameof(target));
+            Util.ArgUtil.File(target, nameof(target));
 
             string entryPoint = Data.EntryPoint;
-            ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
+            Util.ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
 
             // Resolve the working directory.
             string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Work);
-            ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
+            Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
 
             // Agent.PluginHost
-            string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{IOUtil.ExeExtension}");
+            string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
 
             // Agent.PluginHost's arguments
             string arguments = $"\"{target.Replace("\"", "\\\"")}\" {entryPoint}";
+
+            // AgentPluginExecutionContext
+            AgentPluginExecutionContext context = new AgentPluginExecutionContext
+            {
+                Repositories = ExecutionContext.Repositories,
+                Endpoints = ExecutionContext.Endpoints
+            };
+            foreach (var publicVar in ExecutionContext.Variables.Public)
+            {
+                context.Variables[publicVar.Key] = publicVar.Value;
+            }
+            foreach (var publicVar in ExecutionContext.Variables.Private)
+            {
+                context.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
+            }
 
             using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
             {
@@ -71,6 +90,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
                                                   requireExitCodeZero: true,
                                                   outputEncoding: null,
                                                   killProcessOnCancel: false,
+                                                  contentsToStandardIn: new List<string>() { JsonUtility.ToString(context) },
                                                   cancellationToken: ExecutionContext.CancellationToken);
             }
         }
