@@ -216,7 +216,7 @@ namespace Agent.RepositoryPlugin
                 throw new InvalidOperationException("Repository url need to be an absolute uri.");
             }
 
-            string targetPath = repository.Properties.Get<string>("sourcedirectory");
+            string targetPath = repository.Properties.Get<string>("SourceDirectory");
             string sourceBranch = repository.Properties.Get<string>("sourcebranch");
             string sourceVersion = repository.Version;
 

@@ -111,7 +111,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             //     1> set definition variable build.clean or agent.clean.buildDirectory. (on-prem user need to use this, since there is no Web UI in TFS 2016)
             //     2> select source clean option in definition repository tab. (VSTS will have this option in definition designer UI)
             BuildCleanOption overallCleanOption = GetBuildDirectoryCleanOption(executionContext, executionContext.Repositories.Single(x => x.Alias == "self"));
-
+            CreateDirectory(
+                executionContext,
+                description: "source directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.SourcesDirectory),
+                deleteExisting: overallCleanOption == BuildCleanOption.Source);
             CreateDirectory(
                 executionContext,
                 description: "build directory",
@@ -138,8 +142,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 BuildCleanOption cleanOption = GetBuildDirectoryCleanOption(executionContext, repo);
                 CreateDirectory(
                     executionContext,
-                    description: "source directory",
-                    path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.SourcesDirectory),
+                    description: $"source directory {repo.Alias}",
+                    path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.Repositories[repo.Alias].SourceDirectory),
                     deleteExisting: cleanOption == BuildCleanOption.Source);
             }
 

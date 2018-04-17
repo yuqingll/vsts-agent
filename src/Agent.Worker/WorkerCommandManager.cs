@@ -49,36 +49,44 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 return false;
             }
 
-            IWorkerCommandExtension extension;
-            if (_commandExtensions.TryGetValue(command.Area, out extension))
+            var agentPlugins = HostContext.GetService<IAgentPluginManager>();
+            if (agentPlugins.SupportedLoggingCommands.ContainsKey(command.Area) && agentPlugins.SupportedLoggingCommands[command.Area].Contains(command.Event))
             {
-                if (!extension.SupportedHostTypes.HasFlag(context.Variables.System_HostType))
+                agentPlugins.ProcessCommand(context, command);
+            }
+            else
+            {
+                IWorkerCommandExtension extension;
+                if (_commandExtensions.TryGetValue(command.Area, out extension))
                 {
-                    context.Error(StringUtil.Loc("CommandNotSupported", command.Area, context.Variables.System_HostType));
-                    context.CommandResult = TaskResult.Failed;
-                    return false;
-                }
-
-                // process logging command in serialize oreder.
-                lock (_commandSerializeLock)
-                {
-                    try
+                    if (!extension.SupportedHostTypes.HasFlag(context.Variables.System_HostType))
                     {
-                        extension.ProcessCommand(context, command);
-                    }
-                    catch (Exception ex)
-                    {
-                        context.Error(StringUtil.Loc("CommandProcessFailed", input));
-                        context.Error(ex);
+                        context.Error(StringUtil.Loc("CommandNotSupported", command.Area, context.Variables.System_HostType));
                         context.CommandResult = TaskResult.Failed;
+                        return false;
                     }
-                    finally
+
+                    // process logging command in serialize oreder.
+                    lock (_commandSerializeLock)
                     {
-                        // trace the ##vso command as long as the command is not a ##vso[task.debug] command.
-                        if (!(string.Equals(command.Area, "task", StringComparison.OrdinalIgnoreCase) &&
-                              string.Equals(command.Event, "debug", StringComparison.OrdinalIgnoreCase)))
+                        try
                         {
-                            context.Debug($"Processed: {input}");
+                            extension.ProcessCommand(context, command);
+                        }
+                        catch (Exception ex)
+                        {
+                            context.Error(StringUtil.Loc("CommandProcessFailed", input));
+                            context.Error(ex);
+                            context.CommandResult = TaskResult.Failed;
+                        }
+                        finally
+                        {
+                            // trace the ##vso command as long as the command is not a ##vso[task.debug] command.
+                            if (!(string.Equals(command.Area, "task", StringComparison.OrdinalIgnoreCase) &&
+                                  string.Equals(command.Event, "debug", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                context.Debug($"Processed: {input}");
+                            }
                         }
                     }
                 }

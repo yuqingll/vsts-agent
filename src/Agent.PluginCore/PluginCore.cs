@@ -24,6 +24,24 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         Task RunAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
     }
 
+    public interface IAgentTaskPlugin
+    {
+        string FriendlyName { get; set; }
+        string Version { get; set; }
+        string Description { get; set; }
+        string HelpMarkDown { get; set; }
+        string Author { get; set; }
+        TaskInputDefinition[] Inputs { get; }
+        Task RunPreAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
+        Task RunAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
+        Task RunPostAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
+    }
+
+    public interface IAgentCommandPlugin
+    {
+        
+    }
+
     public class AgentCertificateSettings
     {
         public bool SkipServerCertificateValidation { get; set; }

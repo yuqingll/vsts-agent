@@ -191,7 +191,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
                 foreach (var repo in executionContext.Repositories)
                 {
-                    repo.Properties.Set("SourceDirectory", trackingConfig.Repositories[repo.Alias].SourceDirectory);
+                    repo.Properties.Set("SourceDirectory", Path.Combine(_workDirectory, trackingConfig.Repositories[repo.Alias].SourceDirectory));
                 }
             }
             else
