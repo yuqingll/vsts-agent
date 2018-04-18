@@ -67,6 +67,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
     public sealed class TrackingConfig : TrackingConfigBase
     {
+        private Dictionary<string, RepositoryTrackingConfig> _repositories;
         public const string FileFormatVersionJsonProperty = "fileFormatVersion";
 
         // The parameterless constructor is required for deserialization.
@@ -130,19 +131,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             SourcesDirectory = Path.Combine(BuildDirectory, sourcesDirectoryNameOnly);
             TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
 
-            var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
-            if (Repositories == null)
-            {
-                Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
-            }
-
-            Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
-            {
-                RepositoryType = selfRepo.Type,
-                RepositoryUrl = selfRepo.Url.AbsoluteUri,
-                SourceDirectory = SourcesDirectory
-            };
-
             // Set the other properties.
             CollectionId = copy.CollectionId;
             CollectionUrl = executionContext.Variables.System_TFCollectionUrl;
@@ -162,15 +150,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
             SourcesDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.SourcesDirectory);
 
-            if (Repositories == null)
-            {
-                Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
-            }
-
+            // if there is one repository, we will keep using the layout format we have today, _work/1/s 
+            // if there are multiple repositories, we will put each repository under the sub-dir of its alias, _work/1/s/self
             if (executionContext.Repositories.Count == 1)
             {
-                // only one repository
-                var repo = executionContext.Repositories.First();
+                // make sure the only repo is self
+                var repo = executionContext.Repositories.Single(x => x.Alias == "self");
                 Repositories[repo.Alias] = new RepositoryTrackingConfig()
                 {
                     RepositoryType = repo.Type,
@@ -316,7 +301,17 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         public string TestResultsDirectory { get; set; }
 
         [JsonProperty("build_repositories")]
-        public Dictionary<string, RepositoryTrackingConfig> Repositories { get; set; }
+        public Dictionary<string, RepositoryTrackingConfig> Repositories
+        {
+            get
+            {
+                if (_repositories == null)
+                {
+                    _repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+                }
+                return _repositories;
+            }
+        }
 
         public void UpdateJobRunProperties(IExecutionContext executionContext)
         {

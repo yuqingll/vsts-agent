@@ -1,3 +1,4 @@
+using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using System;
 using System.Collections.Generic;
@@ -9,6 +10,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     [ServiceLocator(Default = typeof(AgentPluginManager))]
     public interface IAgentPluginManager : IAgentService
     {
+        Dictionary<Guid, Definition> SupportedTasks { get; }
         Dictionary<string, HashSet<string>> SupportedLoggingCommands { get; }
         void ProcessCommand(IExecutionContext context, Command command);
     }
@@ -16,13 +18,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public sealed class AgentPluginManager : AgentService, IAgentPluginManager
     {
         private readonly Dictionary<string, HashSet<string>> _supportedLoggingCommands = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<Guid, Definition> _supportedTasks = new Dictionary<Guid, Definition>();
         private readonly Dictionary<string, Dictionary<string, AgentPluginInfo>> _loggingCommandAgentPlugins = new Dictionary<string, Dictionary<string, AgentPluginInfo>>(StringComparer.OrdinalIgnoreCase);
-
+        private readonly Dictionary<Guid, AgentPluginInfo> _taskAgentPlugins = new Dictionary<Guid, AgentPluginInfo>();
         public Dictionary<string, HashSet<string>> SupportedLoggingCommands => _supportedLoggingCommands;
+        public Dictionary<Guid, Definition> SupportedTasks => _supportedTasks;
 
         public override void Initialize(IHostContext hostContext)
         {
             base.Initialize(hostContext);
+            //_supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId];
             _supportedLoggingCommands["artifact"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "upload" };
             _loggingCommandAgentPlugins["artifact"] = new Dictionary<string, AgentPluginInfo>(StringComparer.OrdinalIgnoreCase)
             {
@@ -30,11 +35,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     "upload",
                     new AgentPluginInfo()
                     {
-                        AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.DropPlugin{IOUtil.ExeExtension}"),
+                        AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.DropPlugin.dll"),
                         AgentPluginEntryPoint = "AgentDropUploadPlugin"
                     }
                 }
             };
+
+            _taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId] = new AgentPluginInfo()
+            {
+                AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.RepositoryPlugin.dll"),
+                AgentPluginEntryPoint = "CheckoutTask"
+            };
+
+
         }
 
 
@@ -76,5 +89,48 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     {
         public string AgentPluginPath { get; set; }
         public string AgentPluginEntryPoint { get; set; }
+    }
+
+    public static class WellKnownAgentPluginTasks
+    {
+        public static Guid CheckoutTaskId = new Guid("c61807ba-5e20-4b70-bd8c-3683c9f74003");
+
+        public static Definition CheckoutTask = new Definition()
+        {
+            Directory = string.Empty,
+            Data = new DefinitionData()
+            {
+                Author = "Ting",
+                Description = "Checkout",
+                HelpMarkDown = "Call Ting",
+                FriendlyName = "Get Source",
+                Inputs = new TaskInputDefinition[]
+                {
+                    new TaskInputDefinition()
+                    {
+                        Name="repository",
+                        InputType = TaskInputType.String,
+                        DefaultValue="self",
+                        Required=true
+                    }
+                },
+                Execution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = "Agent.RepositoryPlugin.dll",
+                        EntryPoint = "AgentRepositoryCheckoutPlugin"
+                    }
+                },
+                PostJobExecution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = "Agent.RepositoryPlugin.dll",
+                        EntryPoint = "AgentRepositoryCleanupPlugin"
+                    }
+                }
+            }
+        };
     }
 }

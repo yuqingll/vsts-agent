@@ -54,39 +54,35 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 agentPlugins.ProcessCommand(context, command);
             }
-            else
+            else if (_commandExtensions.TryGetValue(command.Area, out IWorkerCommandExtension extension))
             {
-                IWorkerCommandExtension extension;
-                if (_commandExtensions.TryGetValue(command.Area, out extension))
+                if (!extension.SupportedHostTypes.HasFlag(context.Variables.System_HostType))
                 {
-                    if (!extension.SupportedHostTypes.HasFlag(context.Variables.System_HostType))
-                    {
-                        context.Error(StringUtil.Loc("CommandNotSupported", command.Area, context.Variables.System_HostType));
-                        context.CommandResult = TaskResult.Failed;
-                        return false;
-                    }
+                    context.Error(StringUtil.Loc("CommandNotSupported", command.Area, context.Variables.System_HostType));
+                    context.CommandResult = TaskResult.Failed;
+                    return false;
+                }
 
-                    // process logging command in serialize oreder.
-                    lock (_commandSerializeLock)
+                // process logging command in serialize oreder.
+                lock (_commandSerializeLock)
+                {
+                    try
                     {
-                        try
+                        extension.ProcessCommand(context, command);
+                    }
+                    catch (Exception ex)
+                    {
+                        context.Error(StringUtil.Loc("CommandProcessFailed", input));
+                        context.Error(ex);
+                        context.CommandResult = TaskResult.Failed;
+                    }
+                    finally
+                    {
+                        // trace the ##vso command as long as the command is not a ##vso[task.debug] command.
+                        if (!(string.Equals(command.Area, "task", StringComparison.OrdinalIgnoreCase) &&
+                              string.Equals(command.Event, "debug", StringComparison.OrdinalIgnoreCase)))
                         {
-                            extension.ProcessCommand(context, command);
-                        }
-                        catch (Exception ex)
-                        {
-                            context.Error(StringUtil.Loc("CommandProcessFailed", input));
-                            context.Error(ex);
-                            context.CommandResult = TaskResult.Failed;
-                        }
-                        finally
-                        {
-                            // trace the ##vso command as long as the command is not a ##vso[task.debug] command.
-                            if (!(string.Equals(command.Area, "task", StringComparison.OrdinalIgnoreCase) &&
-                                  string.Equals(command.Event, "debug", StringComparison.OrdinalIgnoreCase)))
-                            {
-                                context.Debug($"Processed: {input}");
-                            }
+                            context.Debug($"Processed: {input}");
                         }
                     }
                 }

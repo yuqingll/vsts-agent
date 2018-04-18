@@ -128,106 +128,72 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             TrackingConfig config)
         {
             // first time load existing tracking file.
-            if (config.Repositories == null || config.Repositories.Count == 0)
+            // populate the self repo into the tracking file.
+            if (config.Repositories.Count == 0)
             {
-                config.Repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+                Trace.Info("Populate self repository info for the first time.");
+                var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                config.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
+                {
+                    RepositoryType = selfRepo.Type,
+                    RepositoryUrl = selfRepo.Url.AbsoluteUri,
+                    SourceDirectory = config.SourcesDirectory
+                };
+            }
 
-                if (executionContext.Repositories.Count > 1)
+            // Use to have single repo, now have multiple repositories
+            if (config.Repositories.Count == 1 && executionContext.Repositories.Count > 1)
+            {
+                // move current /s to /s/self since we have more repositories need to stored
+                var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
+                var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.Repositories[selfRepo.Alias].SourceDirectory);
+                var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
+                var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
+                try
                 {
-                    // move current /s to /s/self since we have more repositories need to stored
-                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
-                    var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory);
-                    var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
-                    var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
-                    try
+                    if (Directory.Exists(currentSourceDirectory))
                     {
+                        Trace.Info($"Move current source directory from '{currentSourceDirectory}' to '{newSourceDirectory}'");
                         Directory.Move(currentSourceDirectory, stagingDirectory);
                         Directory.Move(stagingDirectory, newSourceDirectory);
-                    }
-                    catch (Exception ex)
-                    {
-                        // if we can't move the folder and we can't delete the folder, just fail the job.
-                        IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
-                    }
-                    finally
-                    {
-                        foreach (var repo in executionContext.Repositories)
-                        {
-                            config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
-                            {
-                                RepositoryType = repo.Type,
-                                RepositoryUrl = repo.Url.AbsoluteUri,
-                                SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
-                            };
-                        }
+                        config.Repositories[selfRepo.Alias].SourceDirectory = Path.Combine(config.SourcesDirectory, selfRepo.Alias);
                     }
                 }
-                else
+                catch (Exception ex)
                 {
-                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
-                    config.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
-                    {
-                        RepositoryType = selfRepo.Type,
-                        RepositoryUrl = selfRepo.Url.AbsoluteUri,
-                        SourceDirectory = config.SourcesDirectory
-                    };
+                    Trace.Error(ex);
+                    // if we can't move the folder and we can't delete the folder, just fail the job.
+                    IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
                 }
             }
-            else if (config.Repositories.Count == 1)
+
+            // delete local repository if it's no longer need for the definition.
+            List<string> staleRepo = new List<string>();
+            foreach (var repo in config.Repositories)
             {
-                if (executionContext.Repositories.Count > 1)
+                if (!executionContext.Repositories.Any(x => x.Alias == repo.Key) || !executionContext.Repositories.Any(x => x.Url.AbsoluteUri == repo.Value.RepositoryUrl))
                 {
-                    // move current /s to /s/self since we have more repositories need to stored
-                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
-                    var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory);
-                    var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
-                    var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
-                    try
-                    {
-                        Directory.Move(currentSourceDirectory, stagingDirectory);
-                        Directory.Move(stagingDirectory, newSourceDirectory);
-                    }
-                    catch (Exception ex)
-                    {
-                        // if we can't move the folder and we can't delete the folder, just fail the job.
-                        IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
-                    }
-                    finally
-                    {
-                        foreach (var repo in executionContext.Repositories)
-                        {
-                            config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
-                            {
-                                RepositoryType = repo.Type,
-                                RepositoryUrl = repo.Url.AbsoluteUri,
-                                SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
-                            };
-                        }
-                    }
-                }
-                else
-                {
-                    var selfRepo = executionContext.Repositories.Single(x => x.Alias == "self");
-                    config.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
-                    {
-                        RepositoryType = selfRepo.Type,
-                        RepositoryUrl = selfRepo.Url.AbsoluteUri,
-                        SourceDirectory = config.SourcesDirectory
-                    };
+                    IOUtil.DeleteDirectory(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), repo.Value.SourceDirectory), CancellationToken.None);
+                    staleRepo.Add(repo.Key);
                 }
             }
-            else
+            foreach (var stale in staleRepo)
             {
-                // we already have multiple repositories
-                foreach (var repo in executionContext.Repositories)
+                Trace.Info($"Delete stale local repository '{stale}', Url: '{config.Repositories[stale].RepositoryUrl}'");
+                config.Repositories.Remove(stale);
+            }
+
+            // update all repositories' information
+            foreach (var repo in executionContext.Repositories)
+            {
+                if (!config.Repositories.ContainsKey(repo.Alias) || config.Repositories[repo.Alias] == null)
                 {
-                    config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
-                    {
-                        RepositoryType = repo.Type,
-                        RepositoryUrl = repo.Url.AbsoluteUri,
-                        SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
-                    };
+                    config.Repositories[repo.Alias] = new RepositoryTrackingConfig();
                 }
+
+                config.Repositories[repo.Alias].RepositoryType = repo.Type;
+                config.Repositories[repo.Alias].RepositoryUrl = repo.Url.AbsoluteUri;
+                config.Repositories[repo.Alias].SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias);
             }
         }
 

@@ -19,48 +19,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
         Definition Load(Pipelines.TaskStep task);
     }
-    public static class WellKnownAgentPluginTasks
-    {
-        public static string CheckoutTaskId = "c61807ba-5e20-4b70-bd8c-3683c9f74003";
-
-        public static Definition CheckoutTask = new Definition()
-        {
-            Directory = string.Empty,
-            Data = new DefinitionData()
-            {
-                Author = "Ting",
-                Description = "Checkout",
-                HelpMarkDown = "Call Ting",
-                FriendlyName = "Get Source",
-                Inputs = new TaskInputDefinition[]
-                {
-                    new TaskInputDefinition()
-                    {
-                        Name="repository",
-                        InputType = TaskInputType.String,
-                        DefaultValue="self",
-                        Required=true
-                    }
-                },
-                Execution = new ExecutionData()
-                {
-                    AgentPlugin = new AgentPluginHandlerData()
-                    {
-                        Target = "Agent.RepositoryPlugin.dll",
-                        EntryPoint = "AgentRepositoryCheckoutPlugin"
-                    }
-                },
-                PostJobExecution = new ExecutionData()
-                {
-                    AgentPlugin = new AgentPluginHandlerData()
-                    {
-                        Target = "Agent.RepositoryPlugin.dll",
-                        EntryPoint = "AgentRepositoryCleanupPlugin"
-                    }
-                }
-            }
-        };
-    }
 
     public sealed class TaskManager : AgentService, ITaskManager
     {
@@ -90,9 +48,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 return;
             }
 
+            var agentPlugin = HostContext.GetService<IAgentPluginManager>();
             foreach (var task in uniqueTasks.Select(x => x.Reference))
             {
-                if (string.Equals(task.Id.ToString("D"), WellKnownAgentPluginTasks.CheckoutTaskId, StringComparison.OrdinalIgnoreCase))
+                if (agentPlugin.SupportedTasks.ContainsKey(task.Id))
                 {
                     continue;
                 }
@@ -107,9 +66,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             Trace.Entering();
             ArgUtil.NotNull(task, nameof(task));
 
-            if (task.Reference.Id == Guid.Parse(WellKnownAgentPluginTasks.CheckoutTaskId))
+            var agentPlugin = HostContext.GetService<IAgentPluginManager>();
+            if (agentPlugin.SupportedTasks.ContainsKey(task.Reference.Id))
             {
-                return WellKnownAgentPluginTasks.CheckoutTask;
+                return agentPlugin.SupportedTasks[task.Reference.Id];
             }
 
             // Initialize the definition wrapper object.

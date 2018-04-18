@@ -46,8 +46,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
             var trackingManager = HostContext.GetService<ITrackingManager>();
 
-            // Defer to the source provider to calculate the hash key.
-            Trace.Verbose("Calculating build directory hash key.");
+            Trace.Verbose("Calculating build directory hash key."); // key by CollectionID + DefinitionId + SelfRepoIdUrl, we may want to change if we decide to share resource folder.
             string hashKey = GetBuildDirectoryHashKey(executionContext);
             Trace.Verbose($"Hash key: {hashKey}");
 
@@ -140,11 +139,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             foreach (var repo in executionContext.Repositories)
             {
                 BuildCleanOption cleanOption = GetBuildDirectoryCleanOption(executionContext, repo);
+                string sourceDirectory = Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.Repositories[repo.Alias].SourceDirectory);
                 CreateDirectory(
                     executionContext,
                     description: $"source directory {repo.Alias}",
-                    path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.Repositories[repo.Alias].SourceDirectory),
+                    path: sourceDirectory,
                     deleteExisting: cleanOption == BuildCleanOption.Source);
+                repo.Properties.Set<string>("sourcedirectory", sourceDirectory);
             }
 
             return newConfig;

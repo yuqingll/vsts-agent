@@ -149,13 +149,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 executionContext.Debug($"Primary repository: {primaryRepository.Properties.Get<string>("name")}. repository type: {primaryRepository.Type}");
 
                 // Set the primary repo variables.
-                string repositoryId = primaryRepository.Properties.Get<string>("repositoryId"); // TODO: looks like repositoryId can be guid, url and $/
+                string repositoryId = primaryRepository.Id; // make sure Id is same as repositoryId, note: repositoryId can be guid, url and $/
                 if (!string.IsNullOrEmpty(repositoryId))
                 {
                     executionContext.Variables.Set(Constants.Variables.Build.RepoId, repositoryId);
                 }
 
-                executionContext.Variables.Set(Constants.Variables.Build.RepoName, primaryRepository.Properties.Get<string>("Name"));
+                executionContext.Variables.Set(Constants.Variables.Build.RepoName, primaryRepository.Properties.Get<string>("Name") ?? string.Empty);
                 executionContext.Variables.Set(Constants.Variables.Build.RepoProvider, primaryRepository.Type);
                 executionContext.Variables.Set(Constants.Variables.Build.RepoUri, primaryRepository.Url?.AbsoluteUri);
                 executionContext.Variables.Set(Constants.Variables.Build.RepoGitSubmoduleCheckout, primaryRepository.Properties.Get<bool>(RepositoryProperties.CheckoutNestedSubmodules).ToString());
@@ -191,7 +191,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
                 foreach (var repo in executionContext.Repositories)
                 {
-                    repo.Properties.Set("SourceDirectory", Path.Combine(_workDirectory, trackingConfig.Repositories[repo.Alias].SourceDirectory));
+                    executionContext.Variables.Set($"{Constants.Variables.Build.SourcesDirectory}.{repo.Alias}", Path.Combine(_workDirectory, trackingConfig.Repositories[repo.Alias].SourceDirectory));  //TODO: make sure repo alias doesn't have invalid chars.
                 }
             }
             else
