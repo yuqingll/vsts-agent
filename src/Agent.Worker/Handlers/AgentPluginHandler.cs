@@ -37,62 +37,15 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
             Util.ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
             Util.ArgUtil.NotNull(Inputs, nameof(Inputs));
 
-            // Resolve the target assembly.
+            var agentPlugin = HostContext.GetService<IAgentPluginManager>();
             string target = Data.Target;
             Util.ArgUtil.NotNullOrEmpty(target, nameof(target));
-            if (!string.Equals(target, AgentPluginWhiteLists.RepositoryPlugin, StringComparison.OrdinalIgnoreCase))
+            if (!agentPlugin.SupportedTasks.ContainsKey(new Guid(target)))
             {
                 throw new NotSupportedException(target);
             }
-            target = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), target);
-            Util.ArgUtil.File(target, nameof(target));
 
-            string entryPoint = Data.EntryPoint;
-            Util.ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
-
-            // Resolve the working directory.
-            string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Work);
-            Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
-
-            // Agent.PluginHost
-            string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
-
-            // Agent.PluginHost's arguments
-            string arguments = $"\"{target.Replace("\"", "\\\"")}\" {entryPoint}";
-
-            // AgentPluginExecutionContext
-            AgentPluginExecutionContext context = new AgentPluginExecutionContext
-            {
-                Repositories = ExecutionContext.Repositories,
-                Endpoints = ExecutionContext.Endpoints
-            };
-            foreach (var publicVar in ExecutionContext.Variables.Public)
-            {
-                context.Variables[publicVar.Key] = publicVar.Value;
-            }
-            foreach (var publicVar in ExecutionContext.Variables.Private)
-            {
-                context.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
-            }
-
-            using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
-            {
-                processInvoker.OutputDataReceived += OnDataReceived;
-                processInvoker.ErrorDataReceived += OnDataReceived;
-
-                // Execute the process. Exit code 0 should always be returned.
-                // A non-zero exit code indicates infrastructural failure.
-                // Task failure should be communicated over STDOUT using ## commands.
-                await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
-                                                  fileName: file,
-                                                  arguments: arguments,
-                                                  environment: null,
-                                                  requireExitCodeZero: true,
-                                                  outputEncoding: null,
-                                                  killProcessOnCancel: false,
-                                                  contentsToStandardIn: new List<string>() { JsonUtility.ToString(context) },
-                                                  cancellationToken: ExecutionContext.CancellationToken);
-            }
+            await agentPlugin.RunPluginTaskAsync(ExecutionContext, new Guid(target), Inputs, Data.Stage, OnDataReceived);
         }
 
         private void OnDataReceived(object sender, ProcessDataReceivedEventArgs e)

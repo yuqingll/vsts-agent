@@ -445,6 +445,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 }
             }
 
+            // Runtime option variables
+            var runtimeOptions = HostContext.GetService<IConfigurationStore>().GetAgentRuntimeOptions();
+            if (runtimeOptions != null)
+            {
+                Variables.Set(Constants.Variables.Agent.GitUseSChannel, runtimeOptions.GitUseSecureChannel.ToString());
+            }
+
             // Job timeline record.
             InitializeTimelineRecord(
                 timelineId: message.Timeline.Id,

@@ -615,5 +615,18 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 SetInput(nameof(EntryPoint), value);
             }
         }
+
+        public string Stage
+        {
+            get
+            {
+                return GetInput(nameof(Stage));
+            }
+
+            set
+            {
+                SetInput(nameof(Stage), value);
+            }
+        }
     }
 }

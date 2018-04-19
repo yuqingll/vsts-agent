@@ -1,9 +1,14 @@
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
+using Microsoft.VisualStudio.Services.Agent.PluginCore;
 using Microsoft.VisualStudio.Services.Agent.Util;
+using Microsoft.VisualStudio.Services.WebApi;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker
 {
@@ -12,6 +17,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     {
         Dictionary<Guid, Definition> SupportedTasks { get; }
         Dictionary<string, HashSet<string>> SupportedLoggingCommands { get; }
+
+        Task RunPluginTaskAsync(IExecutionContext context, Guid taskId, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler);
         void ProcessCommand(IExecutionContext context, Command command);
     }
 
@@ -35,19 +42,154 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     "upload",
                     new AgentPluginInfo()
                     {
-                        AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.DropPlugin.dll"),
-                        AgentPluginEntryPoint = "AgentDropUploadPlugin"
+                        AgentPluginAssembly = "Agent.DropPlugin",
+                        AgentPluginEntryPointClass = "AgentDropUploadPlugin"
                     }
                 }
             };
 
             _taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId] = new AgentPluginInfo()
             {
-                AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.RepositoryPlugin.dll"),
-                AgentPluginEntryPoint = "CheckoutTask"
+                AgentPluginAssembly = "Agent.RepositoryPlugin",
+                AgentPluginEntryPointClass = "Agent.RepositoryPlugin.CheckoutTask"
             };
+
+            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId] = new Definition() { Directory = HostContext.GetDirectory(WellKnownDirectory.Work) };
+
+            IAgentTaskPlugin taskPlugin = null;
+            string typeName = $"{_taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginEntryPointClass}, {_taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginAssembly}";
+            AssemblyLoadContext.Default.Resolving += ResolveAssembly;
+            try
+            {
+                Type type = Type.GetType(typeName, throwOnError: true);
+                taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
+            }
+            finally
+            {
+                AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
+            }
+
+            Util.ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
+            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data = new DefinitionData()
+            {
+                Author = taskPlugin.Author,
+                Description = taskPlugin.Description,
+                HelpMarkDown = taskPlugin.HelpMarkDown,
+                FriendlyName = taskPlugin.FriendlyName,
+                Inputs = taskPlugin.Inputs
+            };
+
+            if (taskPlugin.Stages.Contains("pre"))
+            {
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.PreJobExecution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = WellKnownAgentPluginTasks.CheckoutTaskId.ToString("D"),
+                        EntryPoint = _taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginEntryPointClass,
+                        Stage = "pre"
+                    }
+                };
+            }
+
+            if (taskPlugin.Stages.Contains("main"))
+            {
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.Execution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = WellKnownAgentPluginTasks.CheckoutTaskId.ToString("D"),
+                        EntryPoint = _taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginEntryPointClass,
+                        Stage = "main"
+                    }
+                };
+            }
+
+            if (taskPlugin.Stages.Contains("post"))
+            {
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.PostJobExecution = new ExecutionData()
+                {
+                    AgentPlugin = new AgentPluginHandlerData()
+                    {
+                        Target = WellKnownAgentPluginTasks.CheckoutTaskId.ToString("D"),
+                        EntryPoint = _taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginEntryPointClass,
+                        Stage = "post"
+                    }
+                };
+            }
         }
 
+        private Assembly ResolveAssembly(AssemblyLoadContext context, AssemblyName assembly)
+        {
+            string assemblyFilename = assembly.Name + ".dll";
+            return context.LoadFromAssemblyPath(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), assemblyFilename));
+        }
+
+        public async Task RunPluginTaskAsync(IExecutionContext context, Guid taskId, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler)
+        {
+            _taskAgentPlugins.TryGetValue(taskId, out AgentPluginInfo plugin);
+            Util.ArgUtil.NotNull(plugin, nameof(plugin));
+
+            string entryPoint = plugin.AgentPluginEntryPointClass;
+            Util.ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
+
+            // Resolve the working directory.
+            string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
+            Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
+
+            // Agent.PluginHost
+            string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
+
+            // Agent.PluginHost's arguments
+            string arguments = $"task \"{plugin.AgentPluginEntryPointClass}, {plugin.AgentPluginAssembly}\"";
+
+            // construct plugin context
+            AgentTaskPluginExecutionContext pluginContext = new AgentTaskPluginExecutionContext
+            {
+                Inputs = inputs,
+                Stage = stage,
+                Repositories = context.Repositories,
+                Endpoints = context.Endpoints,
+                PrependPath = context.PrependPath
+            };
+            // variables
+            foreach (var publicVar in context.Variables.Public)
+            {
+                pluginContext.Variables[publicVar.Key] = publicVar.Value;
+            }
+            foreach (var publicVar in context.Variables.Private)
+            {
+                pluginContext.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
+            }
+            // task variables (used by wrapper task)
+            foreach (var publicVar in context.TaskVariables.Public)
+            {
+                pluginContext.TaskVariables[publicVar.Key] = publicVar.Value;
+            }
+            foreach (var publicVar in context.TaskVariables.Private)
+            {
+                pluginContext.TaskVariables[publicVar.Key] = new VariableValue(publicVar.Value, true);
+            }
+
+            using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
+            {
+                processInvoker.OutputDataReceived += outputHandler;
+                processInvoker.ErrorDataReceived += outputHandler;
+
+                // Execute the process. Exit code 0 should always be returned.
+                // A non-zero exit code indicates infrastructural failure.
+                // Task failure should be communicated over STDOUT using ## commands.
+                await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
+                                                  fileName: file,
+                                                  arguments: arguments,
+                                                  environment: null,
+                                                  requireExitCodeZero: true,
+                                                  outputEncoding: null,
+                                                  killProcessOnCancel: false,
+                                                  contentsToStandardIn: new List<string>() { JsonUtility.ToString(pluginContext) },
+                                                  cancellationToken: context.CancellationToken);
+            }
+        }
 
         public void ProcessCommand(IExecutionContext context, Command command)
         {
@@ -85,8 +227,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
     public class AgentPluginInfo
     {
-        public string AgentPluginPath { get; set; }
-        public string AgentPluginEntryPoint { get; set; }
+        public string AgentPluginAssembly { get; set; }
+        public string AgentPluginEntryPointClass { get; set; }
     }
 
     public static class WellKnownAgentPluginTasks

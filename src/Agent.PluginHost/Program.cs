@@ -5,54 +5,69 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
 using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Microsoft.TeamFoundation.DistributedTask.WebApi;
 
 namespace Microsoft.VisualStudio.Services.Agent.PluginHost
 {
     public static class Program
     {
         private static CancellationTokenSource tokenSource = new CancellationTokenSource();
-        private static string assemblyPath;
 
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
             Console.CancelKeyPress += Console_CancelKeyPress;
             AssemblyLoadContext.Default.Resolving += ResolveAssembly;
 
-            ArgUtil.NotNull(args, nameof(args));
-            ArgUtil.Equal(2, args.Length, nameof(args.Length));
-
-            assemblyPath = args[0];
-            ArgUtil.File(assemblyPath, nameof(assemblyPath));
-
-            string entryPoint = args[1];
-            ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
-
-            var serializedContext = Console.ReadLine();
-            AgentPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentPluginExecutionContext>(serializedContext);
-
-            executionContext.Debug(assemblyPath);
-            executionContext.Debug(entryPoint);
-            executionContext.Debug(serializedContext);
-
-            Assembly pluginAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
-            ArgUtil.NotNull(pluginAssembly, nameof(pluginAssembly));
-
-            IAgentPlugin agentPlugin = pluginAssembly.CreateInstance($"{pluginAssembly.GetName().Name}.{entryPoint}", true) as IAgentPlugin;
-            ArgUtil.NotNull(agentPlugin, nameof(agentPlugin));
-
             try
             {
-                agentPlugin.RunAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                executionContext.Error(ex);
-                // if (ex.InnerException != null)
-                // {
-                //     taskContext.Debug(ex.InnerException.ToString());
-                // }
+                ArgUtil.NotNull(args, nameof(args));
+                ArgUtil.Equal(2, args.Length, nameof(args.Length));
 
-                // taskContext.SetTaskResult("Failed", ex.ToString());
+                string pluginType = args[0];
+                if (string.Equals("task", pluginType, StringComparison.OrdinalIgnoreCase))
+                {
+                    string assemblyQualifiedName = args[1];
+                    ArgUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
+
+                    string serializedContext = Console.ReadLine();
+                    AgentTaskPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentTaskPluginExecutionContext>(serializedContext);
+
+                    executionContext.Debug(assemblyQualifiedName);
+                    executionContext.Debug(serializedContext);
+
+                    Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
+                    var taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
+                    ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
+
+                    try
+                    {
+                        taskPlugin.RunAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        // any exception throw from plugin will fail the task.
+                        executionContext.Fail(ex.ToString());
+                    }
+                    finally
+                    {
+                        AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
+                        Console.CancelKeyPress -= Console_CancelKeyPress;
+                    }
+
+                    return 0;
+                }
+                else if (string.Equals("command", pluginType, StringComparison.OrdinalIgnoreCase))
+                {
+                    string entryPoint = args[1];
+                    ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
+                    return 0;
+                }
+                else
+                {
+                    // infrastructure failure.
+                    Console.Error.WriteLine(new ArgumentOutOfRangeException(pluginType).ToString());
+                    return 1;
+                }
             }
             finally
             {
@@ -64,7 +79,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
         private static Assembly ResolveAssembly(AssemblyLoadContext context, AssemblyName assembly)
         {
             string assemblyFilename = assembly.Name + ".dll";
-            return context.LoadFromAssemblyPath(Path.Combine(Path.GetDirectoryName(assemblyPath), assemblyFilename));
+            return context.LoadFromAssemblyPath(Path.Combine(Directory.GetCurrentDirectory(), assemblyFilename));
         }
 
         private static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)

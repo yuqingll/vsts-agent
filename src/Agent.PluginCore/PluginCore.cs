@@ -19,114 +19,27 @@ using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
 namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 {
-    public interface IAgentPlugin
-    {
-        Task RunAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
-    }
-
     public interface IAgentTaskPlugin
     {
-        string FriendlyName { get; set; }
-        string Version { get; set; }
-        string Description { get; set; }
-        string HelpMarkDown { get; set; }
-        string Author { get; set; }
+        string FriendlyName { get; }
+        string Version { get; }
+        string Description { get; }
+        string HelpMarkDown { get; }
+        string Author { get; }
         TaskInputDefinition[] Inputs { get; }
-        Task RunPreAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
-        Task RunAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
-        Task RunPostAsync(AgentPluginExecutionContext executionContext, CancellationToken token);
+        HashSet<string> Stages { get; }
+        Task RunAsync(AgentTaskPluginExecutionContext executionContext, CancellationToken token);
     }
-
-    public interface IAgentCommandPlugin
+    public class AgentTaskPluginExecutionContext
     {
-        
-    }
-
-    public class AgentCertificateSettings
-    {
-        public bool SkipServerCertificateValidation { get; set; }
-        public string CACertificateFile { get; set; }
-        public string ClientCertificateFile { get; set; }
-        public string ClientCertificatePrivateKeyFile { get; set; }
-        public string ClientCertificateArchiveFile { get; set; }
-        public string ClientCertificatePassword { get; set; }
-    }
-
-    public class AgentRuntimeOptions
-    {
-        public bool GitUseSecureChannel { get; set; }
-    }
-
-    public class AgentWebProxySettings
-    {
-        public string ProxyAddress { get; set; }
-        public string ProxyUsername { get; set; }
-        public string ProxyPassword { get; set; }
-        public List<string> ProxyBypassList { get; set; }
-
-        private readonly List<Regex> _regExBypassList = new List<Regex>();
-        private bool _initialized = false;
-        public bool IsBypassed(Uri uri)
-        {
-            return string.IsNullOrEmpty(ProxyAddress) || uri.IsLoopback || IsMatchInBypassList(uri);
-        }
-
-        private bool IsMatchInBypassList(Uri input)
-        {
-            string matchUriString = input.IsDefaultPort ?
-                input.Scheme + "://" + input.Host :
-                input.Scheme + "://" + input.Host + ":" + input.Port.ToString();
-
-            if (!_initialized)
-            {
-                InitializeBypassList();
-            }
-
-            foreach (Regex r in _regExBypassList)
-            {
-                if (r.IsMatch(matchUriString))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void InitializeBypassList()
-        {
-            foreach (string bypass in ProxyBypassList)
-            {
-                Regex bypassRegex = new Regex(bypass, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ECMAScript);
-                _regExBypassList.Add(bypassRegex);
-            }
-
-            _initialized = true;
-        }
-    }
-
-    public static class VariablesExtension
-    {
-        public static VariableValue GetOrDefault(this Dictionary<string, VariableValue> variables, string key)
-        {
-            if (variables.ContainsKey(key))
-            {
-                return variables[key];
-            }
-            else
-            {
-                return null;
-            }
-        }
-    }
-
-    public class AgentPluginExecutionContext
-    {
-        public AgentPluginExecutionContext()
+        public AgentTaskPluginExecutionContext()
         {
             this.Endpoints = new List<ServiceEndpoint>();
-            this.Variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
+            this.Inputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            this.PrependPath = new List<string>();
             this.Repositories = new List<Pipelines.RepositoryResource>();
+            this.TaskVariables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
+            this.Variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
         }
 
         public AgentCertificateSettings GetCertConfiguration()
@@ -183,10 +96,40 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             }
         }
 
-        public AgentRuntimeOptions RuntimeOptions { get; set; }
+        public string Stage { get; set; }
         public List<ServiceEndpoint> Endpoints { get; set; }
         public List<Pipelines.RepositoryResource> Repositories { get; set; }
         public Dictionary<string, VariableValue> Variables { get; set; }
+        public Dictionary<string, VariableValue> TaskVariables { get; set; }
+        public List<string> PrependPath { get; set; }
+        public Dictionary<string, string> Inputs { get; set; }
+
+        public string GetInput(string name, bool required = false)
+        {
+            string value = null;
+            if (this.Inputs.ContainsKey(name))
+            {
+                value = this.Inputs[name];
+            }
+
+            if (string.IsNullOrEmpty(value) && required)
+            {
+                throw new ArgumentNullException(name);
+            }
+
+            return value;
+        }
+
+        public void Fail(string message)
+        {
+            if (!string.IsNullOrEmpty(message))
+            {
+                Error(message);
+            }
+
+            Console.WriteLine($"##vso[task.complete result=Failed;]{message}");
+        }
+
         public void Debug(string message)
         {
             Console.WriteLine($"##vso[task.debug]{message}");
@@ -225,6 +168,69 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         public void Command(string command)
         {
             Console.WriteLine($"##[command]{command}");
+        }
+    }
+
+    public interface IAgentCommandPlugin
+    {
+
+    }
+
+    public class AgentCertificateSettings
+    {
+        public bool SkipServerCertificateValidation { get; set; }
+        public string CACertificateFile { get; set; }
+        public string ClientCertificateFile { get; set; }
+        public string ClientCertificatePrivateKeyFile { get; set; }
+        public string ClientCertificateArchiveFile { get; set; }
+        public string ClientCertificatePassword { get; set; }
+    }
+
+    public class AgentWebProxySettings
+    {
+        public string ProxyAddress { get; set; }
+        public string ProxyUsername { get; set; }
+        public string ProxyPassword { get; set; }
+        public List<string> ProxyBypassList { get; set; }
+
+        private readonly List<Regex> _regExBypassList = new List<Regex>();
+        private bool _initialized = false;
+        public bool IsBypassed(Uri uri)
+        {
+            return string.IsNullOrEmpty(ProxyAddress) || uri.IsLoopback || IsMatchInBypassList(uri);
+        }
+
+        private bool IsMatchInBypassList(Uri input)
+        {
+            string matchUriString = input.IsDefaultPort ?
+                input.Scheme + "://" + input.Host :
+                input.Scheme + "://" + input.Host + ":" + input.Port.ToString();
+
+            if (!_initialized)
+            {
+                InitializeBypassList();
+            }
+
+            foreach (Regex r in _regExBypassList)
+            {
+                if (r.IsMatch(matchUriString))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void InitializeBypassList()
+        {
+            foreach (string bypass in ProxyBypassList)
+            {
+                Regex bypassRegex = new Regex(bypass, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ECMAScript);
+                _regExBypassList.Add(bypassRegex);
+            }
+
+            _initialized = true;
         }
     }
 
@@ -733,11 +739,11 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         private readonly ConcurrentQueue<string> _outputData = new ConcurrentQueue<string>();
         private readonly TimeSpan _sigintTimeout = TimeSpan.FromSeconds(10);
         private readonly TimeSpan _sigtermTimeout = TimeSpan.FromSeconds(5);
-        private readonly AgentPluginExecutionContext executionContext;
+        private readonly AgentTaskPluginExecutionContext executionContext;
         public event EventHandler<ProcessDataReceivedEventArgs> OutputDataReceived;
         public event EventHandler<ProcessDataReceivedEventArgs> ErrorDataReceived;
 
-        public ProcessInvoker(AgentPluginExecutionContext executionContext)
+        public ProcessInvoker(AgentTaskPluginExecutionContext executionContext)
         {
             this.executionContext = executionContext;
         }
