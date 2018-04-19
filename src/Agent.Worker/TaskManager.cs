@@ -66,6 +66,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             Trace.Entering();
             ArgUtil.NotNull(task, nameof(task));
 
+            // return task definition from agent plugin.
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
             if (agentPlugin.SupportedTasks.ContainsKey(task.Reference.Id))
             {

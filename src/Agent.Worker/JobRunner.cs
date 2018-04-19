@@ -73,7 +73,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 },
                 Reference = new Pipelines.TaskStepDefinitionReference()
                 {
-                    Id = new Guid(WellKnownAgentPluginTasks.CheckoutTaskId),
+                    Id = WellKnownAgentPluginTasks.CheckoutTaskId,
                     Name = "checkout",
                     Version = "1.0.0"
                 }

@@ -46,8 +46,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 AgentPluginPath = Path.Combine(hostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.RepositoryPlugin.dll"),
                 AgentPluginEntryPoint = "CheckoutTask"
             };
-
-
         }
 
 
