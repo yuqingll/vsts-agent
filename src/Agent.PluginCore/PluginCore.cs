@@ -127,7 +127,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
                 Error(message);
             }
 
-            Console.WriteLine($"##vso[task.complete result=Failed;]{message}");
+            Console.WriteLine($"##vso[task.complete result=Failed;]");
         }
 
         public void Debug(string message)
@@ -165,6 +165,18 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             Console.WriteLine($"##vso[task.setsecret]{secret}");
         }
 
+        public void SetVariable(string variable, string value, bool isSecret = false)
+        {
+            this.Variables[variable] = new VariableValue(value, isSecret);
+            Console.WriteLine($"##vso[task.setvariable variable={variable};issecret={isSecret.ToString()};]{value}");
+        }
+
+        public void SetTaskVariable(string variable, string value, bool isSecret = false)
+        {
+            this.TaskVariables[variable] = new VariableValue(value, isSecret);
+            Console.WriteLine($"##vso[task.settaskvariable variable={variable};issecret={isSecret.ToString()};]{value}");
+        }
+
         public void Command(string command)
         {
             Console.WriteLine($"##[command]{command}");
@@ -173,7 +185,43 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
     public interface IAgentCommandPlugin
     {
+        Task ProcessCommandAsync(AgentCommandPluginExecutionContext executionContext, CancellationToken token);
+    }
 
+    public class AgentCommandPluginExecutionContext
+    {
+        public AgentCommandPluginExecutionContext()
+        {
+            this.Endpoints = new List<ServiceEndpoint>();
+            this.Properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            this.Repositories = new List<Pipelines.RepositoryResource>();
+            this.Variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
+        }
+
+
+        public string Data { get; set; }
+        public Dictionary<string, string> Properties { get; set; }
+        public List<ServiceEndpoint> Endpoints { get; set; }
+        public List<Pipelines.RepositoryResource> Repositories { get; set; }
+        public Dictionary<string, VariableValue> Variables { get; set; }
+
+        public void Debug(string message)
+        {
+            if (StringUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("system.debug")?.Value))
+            {
+                Console.WriteLine($"##[debug]{message}");
+            }
+        }
+
+        public void Output(string message)
+        {
+            Console.WriteLine(message);
+        }
+
+        public void Fail(string message)
+        {
+            Console.Error.WriteLine(message);
+        }
     }
 
     public class AgentCertificateSettings
@@ -257,6 +305,17 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         public static T ConvertFromJson<T>(string value)
         {
             return JsonConvert.DeserializeObject<T>(value, s_serializerSettings.Value);
+        }
+        public static Encoding GetSystemEncoding()
+        {
+#if OS_WINDOWS
+            // The static constructor should have registered the required encodings.
+            // Code page 0 is equivalent to the current system default (i.e. CP_ACP).
+            // E.g. code page 1252 on an en-US box.
+            return Encoding.GetEncoding(0);
+#else
+            throw new NotSupportedException(nameof(GetSystemEncoding)); // Should never reach here.
+#endif
         }
 
         public static void EnsureRegisterEncodings()

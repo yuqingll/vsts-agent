@@ -58,8 +58,34 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
                 }
                 else if (string.Equals("command", pluginType, StringComparison.OrdinalIgnoreCase))
                 {
-                    string entryPoint = args[1];
-                    ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
+                    string assemblyQualifiedName = args[1];
+                    ArgUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
+
+                    string serializedContext = Console.ReadLine();
+                    AgentCommandPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentCommandPluginExecutionContext>(serializedContext);
+
+                    executionContext.Debug(assemblyQualifiedName);
+                    executionContext.Debug(serializedContext);
+
+                    Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
+                    var commandPlugin = Activator.CreateInstance(type) as IAgentCommandPlugin;
+                    ArgUtil.NotNull(commandPlugin, nameof(commandPlugin));
+
+                    try
+                    {
+                        commandPlugin.ProcessCommandAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        // any exception throw from plugin will fail the task.
+                        executionContext.Fail(ex.ToString());
+                    }
+                    finally
+                    {
+                        AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
+                        Console.CancelKeyPress -= Console_CancelKeyPress;
+                    }
+
                     return 0;
                 }
                 else

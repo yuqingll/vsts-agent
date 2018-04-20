@@ -42,7 +42,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     new AgentPluginInfo()
                     {
                         AgentPluginAssembly = "Agent.DropPlugin",
-                        AgentPluginEntryPointClass = "AgentDropUploadPlugin"
+                        AgentPluginEntryPointClass = "Agent.DropPlugin.ArtifactUploadCommand"
                     }
                 }
             };
@@ -129,9 +129,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             _taskAgentPlugins.TryGetValue(taskId, out AgentPluginInfo plugin);
             Util.ArgUtil.NotNull(plugin, nameof(plugin));
 
-            string entryPoint = plugin.AgentPluginEntryPointClass;
-            Util.ArgUtil.NotNullOrEmpty(entryPoint, nameof(entryPoint));
-
             // Resolve the working directory.
             string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
             Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
@@ -192,36 +189,94 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
         public void ProcessCommand(IExecutionContext context, Command command)
         {
+            // queue async command task to run agent plugin.
+            context.Debug($"Process {command.Area}.{command.Event} command at backend.");
+            var commandContext = HostContext.CreateService<IAsyncCommandContext>();
+            commandContext.InitializeCommandContext(context, "Process Command");
+            commandContext.Task = ProcessPluginCommandAsync(commandContext, command, context.CancellationToken);
+            context.AsyncCommands.Add(commandContext);
+        }
+
+        private async Task ProcessPluginCommandAsync(IAsyncCommandContext context, Command command, CancellationToken token)
+        {
             if (_loggingCommandAgentPlugins.ContainsKey(command.Area) && _loggingCommandAgentPlugins[command.Area].ContainsKey(command.Event))
             {
                 var plugin = _loggingCommandAgentPlugins[command.Area][command.Event];
+                Util.ArgUtil.NotNull(plugin, nameof(plugin));
 
-                // queue async command task to associate artifact.
-                //context.Debug($"Associate artifact: {artifactName} with build: {buildId.Value} at backend.");
-                // var commandContext = HostContext.CreateService<IAsyncCommandContext>();
-                // commandContext.InitializeCommandContext(context, StringUtil.Loc("AssociateArtifact"));
-                // commandContext.Task = AssociateArtifactAsync(commandContext,
-                //                                              WorkerUtilities.GetVssConnection(context),
-                //                                              projectId,
-                //                                              buildId.Value,
-                //                                              artifactName,
-                //                                              artifactType,
-                //                                              artifactData,
-                //                                              propertyDictionary,
-                //                                              context.CancellationToken);
-                // context.AsyncCommands.Add(commandContext);
+                // Resolve the working directory.
+                string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
+                Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
 
+                // Agent.PluginHost
+                string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
+
+                // Agent.PluginHost's arguments
+                string arguments = $"command \"{plugin.AgentPluginEntryPointClass}, {plugin.AgentPluginAssembly}\"";
+
+                // construct plugin context
+                AgentCommandPluginExecutionContext pluginContext = new AgentCommandPluginExecutionContext
+                {
+                    Data = command.Data,
+                    Properties = command.Properties,
+                    Repositories = context.RawContext.Repositories,
+                    Endpoints = context.RawContext.Endpoints,
+                };
+                // variables
+                foreach (var publicVar in context.RawContext.Variables.Public)
+                {
+                    pluginContext.Variables[publicVar.Key] = publicVar.Value;
+                }
+                foreach (var publicVar in context.RawContext.Variables.Private)
+                {
+                    pluginContext.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
+                }
+
+                using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
+                {
+                    object stderrLock = new object();
+                    List<string> stderr = new List<string>();
+                    processInvoker.OutputDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
+                    {
+                        context.Output(e.Data);
+                    };
+                    processInvoker.ErrorDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
+                    {
+                        lock (stderrLock)
+                        {
+                            stderr.Add(e.Data);
+                        };
+                    }; ;
+
+                    // Execute the process. Exit code 0 should always be returned.
+                    // A non-zero exit code indicates infrastructural failure.
+                    // Task failure should be communicated over STDOUT using ## commands.
+                    int returnCode = await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
+                                                      fileName: file,
+                                                      arguments: arguments,
+                                                      environment: null,
+                                                      requireExitCodeZero: false,
+                                                      outputEncoding: null,
+                                                      killProcessOnCancel: false,
+                                                      contentsToStandardIn: new List<string>() { JsonUtility.ToString(pluginContext) },
+                                                      cancellationToken: token);
+
+                    if (returnCode != 0)
+                    {
+                        context.Output(string.Join(Environment.NewLine, stderr));
+                        throw new ProcessExitCodeException(returnCode, file, arguments);
+                    }
+                    else if (stderr.Count > 0)
+                    {
+                        throw new InvalidOperationException(string.Join(Environment.NewLine, stderr));
+                    }
+                }
             }
             else
             {
                 throw new NotSupportedException(command.ToString());
             }
         }
-
-        // public async Task ExecuteAgentPluginAsync()
-        // { 
-
-        // }
     }
 
     public class AgentPluginInfo

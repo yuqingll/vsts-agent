@@ -15,17 +15,8 @@ using Microsoft.VisualStudio.Services.WebApi;
 
 namespace Agent.RepositoryPlugin
 {
-    public interface ISourceProvider
-    {
-        Task GetSourceAsync(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository, CancellationToken cancellationToken);
-
-        Task PostJobCleanupAsync(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository);
-    }
-
     public class ExternalGitSourceProvider : GitSourceProvider
     {
-        public override string RepositoryType => RepositoryTypes.Git;
-
         // external git repository won't use auth header cmdline arg, since we don't know the auth scheme.
         public override bool GitSupportUseAuthHeader(AgentTaskPluginExecutionContext executionContext, GitCommandManager gitCommandManager)
         {
@@ -56,7 +47,7 @@ namespace Agent.RepositoryPlugin
         }
     }
 
-    public abstract class AuthenticatedGitSourceProvider : GitSourceProvider
+    public sealed class AuthenticatedGitSourceProvider : GitSourceProvider
     {
         public override bool GitSupportUseAuthHeader(AgentTaskPluginExecutionContext executionContext, GitCommandManager gitCommandManager)
         {
@@ -94,25 +85,8 @@ namespace Agent.RepositoryPlugin
         }
     }
 
-    public sealed class GitHubSourceProvider : AuthenticatedGitSourceProvider
-    {
-        public override string RepositoryType => RepositoryTypes.GitHub;
-    }
-
-    public sealed class GitHubEnterpriseSourceProvider : AuthenticatedGitSourceProvider
-    {
-        public override string RepositoryType => RepositoryTypes.GitHubEnterprise;
-    }
-
-    public sealed class BitbucketSourceProvider : AuthenticatedGitSourceProvider
-    {
-        public override string RepositoryType => RepositoryTypes.Bitbucket;
-    }
-
     public sealed class TfsGitSourceProvider : GitSourceProvider
     {
-        public override string RepositoryType => RepositoryTypes.TfsGit;
-
         public override bool GitSupportUseAuthHeader(AgentTaskPluginExecutionContext executionContext, GitCommandManager gitCommandManager)
         {
             // v2.9 git exist use auth header for tfsgit repository.
@@ -191,7 +165,6 @@ namespace Agent.RepositoryPlugin
         // min git-lfs version that support add extra auth header.
         protected Version _minGitLfsVersionSupportAuthHeader = new Version(2, 1);
 
-        public abstract string RepositoryType { get; }
         public abstract bool GitSupportUseAuthHeader(AgentTaskPluginExecutionContext executionContext, GitCommandManager gitCommandManager);
         public abstract bool GitLfsSupportUseAuthHeader(AgentTaskPluginExecutionContext executionContext, GitCommandManager gitCommandManager);
         public abstract void RequirementCheck(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository, GitCommandManager gitCommandManager);
@@ -224,7 +197,8 @@ namespace Agent.RepositoryPlugin
             }
 
             string targetPath = repository.Properties.Get<string>("sourcedirectory");
-            string sourceBranch = repository.Properties.Get<string>("sourcebranch"); string sourceVersion = repository.Version;
+            string sourceBranch = repository.Properties.Get<string>("sourcebranch");
+            string sourceVersion = repository.Version;
 
             bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
             bool checkoutSubmodules = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutSubmodules));
@@ -299,7 +273,12 @@ namespace Agent.RepositoryPlugin
             RequirementCheck(executionContext, repository, gitCommandManager);
 
             // retrieve credential from endpoint.
-            var endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
+            ServiceEndpoint endpoint = null;
+            if (repository.Endpoint != null)
+            {
+                endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
+            }
+
             string username = string.Empty;
             string password = string.Empty;
             if (!selfManageGitCreds && endpoint != null && endpoint.Authorization != null)
@@ -962,22 +941,22 @@ namespace Agent.RepositoryPlugin
             // Set intra-task variable for post job cleanup
             if (selfManageGitCreds)
             {
-                executionContext.TaskVariables["cleanupcreds"] = "true";
+                executionContext.SetTaskVariable("cleanupcreds", "true");
             }
 
             if (repositoryUrlWithCred != null)
             {
-                executionContext.TaskVariables["repoUrlWithCred"] = new VariableValue(repositoryUrlWithCred.AbsoluteUri, true);
+                executionContext.SetTaskVariable("repoUrlWithCred", repositoryUrlWithCred.AbsoluteUri, true);
             }
 
             if (configModifications.Count > 0)
             {
-                executionContext.TaskVariables["modifiedgitconfig"] = new VariableValue(JsonUtility.ToString(configModifications), true);
+                executionContext.SetTaskVariable("modifiedgitconfig", JsonUtility.ToString(configModifications), true);
             }
 
             if (useClientCert && !string.IsNullOrEmpty(clientCertPrivateKeyAskPassFile))
             {
-                executionContext.TaskVariables["clientCertAskPass"] = clientCertPrivateKeyAskPassFile;
+                executionContext.SetTaskVariable("clientCertAskPass", clientCertPrivateKeyAskPassFile);
             }
         }
 
