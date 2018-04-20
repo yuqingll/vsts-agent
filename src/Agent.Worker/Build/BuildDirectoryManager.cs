@@ -46,7 +46,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
             var trackingManager = HostContext.GetService<ITrackingManager>();
 
-            Trace.Verbose("Calculating build directory hash key."); // key by CollectionID + DefinitionId + SelfRepoIdUrl, we may want to change if we decide to share resource folder.
+            // key by CollectionID + DefinitionId + SelfRepoIdUrl, we may want to change if we decide to share resource folder.
+            Trace.Verbose("Calculating build directory hash key.");
             string hashKey = GetBuildDirectoryHashKey(executionContext);
             Trace.Verbose($"Hash key: {hashKey}");
 
@@ -87,8 +88,23 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             }
             else
             {
-                // Convert legacy format to the new format if required.
+                // Convert legacy format to the new format if required. (1.x agent -> 2.x agent)
                 newConfig = ConvertToNewFormat(executionContext, existingConfig);
+
+                // Convert to new format that support multi-repositories
+                if (newConfig.FileFormatVersion < 4)
+                {
+                    // populate the self repo into the tracking file.
+                    Trace.Info("Populate self repository info for the first time.");
+                    var selfRepo = executionContext.Repositories.Single(x => string.Equals(x.Alias, "self", StringComparison.OrdinalIgnoreCase));
+                    newConfig.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
+                    {
+                        RepositoryType = selfRepo.Type,
+                        RepositoryUrl = selfRepo.Url.AbsoluteUri,
+                        SourceDirectory = newConfig.SourcesDirectory
+                    };
+                    newConfig.FileFormatVersion = 4;
+                }
 
                 // Update repositories tracking information for each repository
                 trackingManager.UpdateRepositories(executionContext, newConfig);

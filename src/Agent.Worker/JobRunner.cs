@@ -62,7 +62,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 Alias = "agent",
                 Type = "TfsGit",
                 Url = new Uri("https://tingweu.visualstudio.com/g/_git/vsts-agent"),
-                Version = "67f37676dd69b3f96e138121d60a680f3726985b",
+                Version = "67f37676dd69b3f96e138121d60a680f3726985a",
             };
             tfsGit2.Properties.Set<bool>("clean", true);
             tfsGit2.Properties.Set<string>("branch", "master");

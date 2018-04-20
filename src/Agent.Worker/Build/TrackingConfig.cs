@@ -200,16 +200,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         {
             get
             {
-                return 3;
+                return 4;
             }
 
             set
             {
+                // Version 4 changes:
+                //   Multi-Repositories support was added.
                 // Version 3 changes:
                 //   CollectionName was removed.
                 //   CollectionUrl was added.
                 switch (value)
                 {
+                    case 4:
                     case 3:
                     case 2:
                         break;

@@ -34,7 +34,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public override void Initialize(IHostContext hostContext)
         {
             base.Initialize(hostContext);
-            //_supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId];
             _supportedLoggingCommands["artifact"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "upload" };
             _loggingCommandAgentPlugins["artifact"] = new Dictionary<string, AgentPluginInfo>(StringComparer.OrdinalIgnoreCase)
             {
