@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -12,6 +13,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
     public interface ISourceProvider : IExtension, IAgentService
     {
         string RepositoryType { get; }
+
+        void MigrateSourceDirectory(IExecutionContext executionContext, string currentSourceDir, string targetSourceDir);
+
+        void DestroySourceDirectory(IExecutionContext executionContext, string sourceDir);
 
         string GetBuildDirectoryHashKey(IExecutionContext executionContext, Uri repositoryUrl);
 
@@ -68,6 +73,30 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             return path;
         }
 
+        public virtual void MigrateSourceDirectory(IExecutionContext executionContext, string currentSourceDir, string targetSourceDir)
+        {
+            // move current /s to /s/self since we have more repositories need to stored
+            executionContext.Debug($"Move current source directory from '{currentSourceDir}' to '{targetSourceDir}'");
+            var stagingDir = Path.Combine(executionContext.Variables.Agent_TempDirectory, Guid.NewGuid().ToString("D"));
+            try
+            {
+                Directory.Move(currentSourceDir, stagingDir);
+                Directory.Move(stagingDir, targetSourceDir);
+            }
+            catch (Exception ex)
+            {
+                Trace.Error(ex);
+                // if we can't move the folder and we can't delete the folder, just fail the job.
+                IOUtil.DeleteDirectory(currentSourceDir, CancellationToken.None);
+            }
+        }
+
+        public virtual void DestroySourceDirectory(IExecutionContext executionContext, string sourceDir)
+        {
+            executionContext.Debug($"Destroy current {this.RepositoryType} source directory under '{sourceDir}'.");
+            IOUtil.DeleteDirectory(sourceDir, CancellationToken.None);
+        }
+
         public virtual void SetVariablesInEndpoint(IExecutionContext executionContext, ServiceEndpoint endpoint)
         {
             endpoint.Data.Add(Constants.EndpointData.SourcesDirectory, executionContext.Variables.Get(Constants.Variables.Build.SourcesDirectory));
@@ -87,7 +116,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             trace.Info($"Get '{name}' (not found)");
             return null;
         }
-        
+
         public virtual Task RunMaintenanceOperations(IExecutionContext executionContext, string repositoryPath)
         {
             return Task.CompletedTask;

@@ -66,7 +66,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Maintenance
             }
         }
 
-        public override void InitializeJobExtension(IExecutionContext context)
+        public override void InitializeJobExtension(IExecutionContext executionContext)
+        {
+            InitializeJobExtensionLegacy(executionContext);
+        }
+
+        public override void InitializeJobExtensionLegacy(IExecutionContext context)
         {
             return;
         }

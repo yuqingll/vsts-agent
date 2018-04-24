@@ -31,7 +31,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         void MarkForGarbageCollection(IExecutionContext executionContext, TrackingConfigBase config);
 
-        void UpdateRepositories(IExecutionContext executionContext, TrackingConfig config);
+        void UpdateResourcesTracking(IExecutionContext executionContext, TrackingConfig config);
 
         void UpdateJobRunProperties(IExecutionContext executionContext, TrackingConfig config, string file);
 
@@ -121,59 +121,85 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 topLevelConfig.LastBuildDirectoryNumber,
                 hashKey);
             WriteToFile(file, config);
+
+            // Set repository resource variable
+            foreach (var repoResource in config.Resources.Repositories)
+            {
+                var repo = executionContext.Repositories.Single(x => x.Alias == repoResource.Key);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.id", repo.Id);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.name", repo.Properties.Get<string>("name") ?? string.Empty);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.provider", repo.Type);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.uri", repo.Url?.AbsoluteUri);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.clean", repo.Properties.Get<string>("clean") ?? string.Empty);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.localpath", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), repoResource.Value.SourceDirectory));
+            }
+
+            // Set build drop resource variable
+            foreach (var dropResource in config.Resources.Drops)
+            {
+                var build = executionContext.Builds.Single(x => x.Alias == dropResource.Key);
+                executionContext.Variables.Set($"system.build.{build.Alias}.version", build.Version);
+                executionContext.Variables.Set($"system.build.{build.Alias}.type", build.Type);
+                executionContext.Variables.Set($"system.build.{build.Alias}.localpath", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), dropResource.Value.DropDirectory));
+            }
+
             return config;
         }
 
-        public void UpdateRepositories(
+        public void UpdateResourcesTracking(
             IExecutionContext executionContext,
             TrackingConfig config)
         {
             // Use to be single repo and never have multiple repositories, now have multiple repositories
-            if (config.Repositories.Count == 1 && executionContext.Repositories.Count > 1)
+            var extensions = HostContext.GetService<IExtensionManager>();
+            if (config.Resources.Repositories.Count == 1 && executionContext.Repositories.Count > 1)
             {
                 var selfRepo = executionContext.Repositories.Single(x => string.Equals(x.Alias, "self", StringComparison.OrdinalIgnoreCase));
                 ArgUtil.NotNull(selfRepo, nameof(selfRepo));
-                config.Repositories.TryGetValue("self", out RepositoryTrackingConfig selfRepoTracking);
+                config.Resources.Repositories.TryGetValue("self", out RepositoryTrackingConfig selfRepoTracking);
                 ArgUtil.NotNull(selfRepoTracking, nameof(selfRepoTracking));
 
                 if (string.Equals(selfRepoTracking.SourceDirectory, config.SourcesDirectory, StringComparison.OrdinalIgnoreCase))
                 {
                     var currentSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), selfRepoTracking.SourceDirectory);
+                    var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
                     if (Directory.Exists(currentSourceDirectory))
                     {
-                        if (selfRepoTracking.RepositoryType == RepositoryTypes.TfsVersionControl)
-                        {
-                            // invoke tf.exe to delete the workspace.
-                            executionContext.Debug($"Destroy current TFVC source directory under '{currentSourceDirectory}'.");
-                            // DestroyTFVCSourceDirectory();
-                        }
-                        else
-                        {
-                            // move current /s to /s/self since we have more repositories need to stored
-                            var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
-                            var newSourceDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.SourcesDirectory, selfRepo.Alias);
-                            executionContext.Debug($"Move current source directory from '{currentSourceDirectory}' to '{newSourceDirectory}'");
-                            try
-                            {
-                                Directory.Move(currentSourceDirectory, stagingDirectory);
-                                Directory.Move(stagingDirectory, newSourceDirectory);
-                            }
-                            catch (Exception ex)
-                            {
-                                Trace.Error(ex);
-                                // if we can't move the folder and we can't delete the folder, just fail the job.
-                                IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
-                            }
-                        }
+                        var sourceProvider = extensions.GetExtensions<ISourceProvider>().Single(x => x.RepositoryType == selfRepoTracking.RepositoryType);
+                        sourceProvider.MigrateSourceDirectory(executionContext, currentSourceDirectory, newSourceDirectory);
+                        // if (selfRepoTracking.RepositoryType == RepositoryTypes.TfsVersionControl)
+                        // {
+                        //     // invoke tf.exe to delete the workspace.
+                        //     executionContext.Debug($"Destroy current TFVC source directory under '{currentSourceDirectory}'.");
+                        //     // DestroyTFVCSourceDirectory();
+                        // }
+                        // else
+                        // {
+                        //     // move current /s to /s/self since we have more repositories need to stored
+                        //     var stagingDirectory = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.BuildDirectory, Guid.NewGuid().ToString("D"));
+
+                        //     executionContext.Debug($"Move current source directory from '{currentSourceDirectory}' to '{newSourceDirectory}'");
+                        //     try
+                        //     {
+                        //         Directory.Move(currentSourceDirectory, stagingDirectory);
+                        //         Directory.Move(stagingDirectory, newSourceDirectory);
+                        //     }
+                        //     catch (Exception ex)
+                        //     {
+                        //         Trace.Error(ex);
+                        //         // if we can't move the folder and we can't delete the folder, just fail the job.
+                        //         IOUtil.DeleteDirectory(currentSourceDirectory, CancellationToken.None);
+                        //     }
+                        // }
                     }
 
-                    config.Repositories[selfRepo.Alias].SourceDirectory = Path.Combine(config.SourcesDirectory, selfRepo.Alias);
+                    config.Resources.Repositories[selfRepo.Alias].SourceDirectory = Path.Combine(config.SourcesDirectory, selfRepo.Alias);
                 }
             }
 
             // delete local repository if it's no longer need for the definition.
             List<string> staleRepo = new List<string>();
-            foreach (var repo in config.Repositories)
+            foreach (var repo in config.Resources.Repositories)
             {
                 var existingRepo = executionContext.Repositories.SingleOrDefault(x => string.Equals(x.Alias, repo.Key, StringComparison.OrdinalIgnoreCase));
                 if (existingRepo == null || !string.Equals(existingRepo.Url.AbsoluteUri, repo.Value.RepositoryUrl, StringComparison.OrdinalIgnoreCase))
@@ -183,32 +209,47 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             }
             foreach (var stale in staleRepo)
             {
-                executionContext.Debug($"Delete stale local source directory '{config.Repositories[stale].SourceDirectory}' for repository '{config.Repositories[stale].RepositoryUrl}' ({stale}).");
-                if (config.Repositories[stale].RepositoryType == RepositoryTypes.TfsVersionControl)
-                {
-                    // DestroyTFVCSourceDirectory();
-                }
-                else
-                {
-                    IOUtil.DeleteDirectory(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.Repositories[stale].SourceDirectory), CancellationToken.None);
-                }
-
-                config.Repositories.Remove(stale);
+                executionContext.Debug($"Delete stale local source directory '{config.Resources.Repositories[stale].SourceDirectory}' for repository '{config.Resources.Repositories[stale].RepositoryUrl}' ({stale}).");
+                var sourceDir = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), config.Resources.Repositories[stale].SourceDirectory);
+                var sourceProvider = extensions.GetExtensions<ISourceProvider>().Single(x => x.RepositoryType == config.Resources.Repositories[stale].RepositoryType);
+                sourceProvider.DestroySourceDirectory(executionContext, sourceDir);
+                config.Resources.Repositories.Remove(stale);
             }
 
             // add any new repositories' information
             foreach (var repo in executionContext.Repositories)
             {
-                if (!config.Repositories.ContainsKey(repo.Alias))
+                if (!config.Resources.Repositories.ContainsKey(repo.Alias))
                 {
                     executionContext.Debug($"Add new repository '{repo.Url.AbsoluteUri}' ({repo.Alias}) at '{Path.Combine(config.SourcesDirectory, repo.Alias)}'.");
-                    config.Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                    config.Resources.Repositories[repo.Alias] = new RepositoryTrackingConfig()
                     {
                         RepositoryType = repo.Type,
                         RepositoryUrl = repo.Url.AbsoluteUri,
                         SourceDirectory = Path.Combine(config.SourcesDirectory, repo.Alias)
                     };
                 }
+            }
+
+            // Set repository resource variable
+            foreach (var repoResource in config.Resources.Repositories)
+            {
+                var repo = executionContext.Repositories.Single(x => x.Alias == repoResource.Key);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.id", repo.Id);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.name", repo.Properties.Get<string>("name") ?? string.Empty);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.provider", repo.Type);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.uri", repo.Url?.AbsoluteUri);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.clean", repo.Properties.Get<string>("clean") ?? string.Empty);
+                executionContext.Variables.Set($"system.repository.{repo.Alias}.localpath", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), repoResource.Value.SourceDirectory));
+            }
+
+            // Set build drop resource variable
+            foreach (var dropResource in config.Resources.Drops)
+            {
+                var build = executionContext.Builds.Single(x => x.Alias == dropResource.Key);
+                executionContext.Variables.Set($"system.build.{build.Alias}.version", build.Version);
+                executionContext.Variables.Set($"system.build.{build.Alias}.type", build.Type);
+                executionContext.Variables.Set($"system.build.{build.Alias}.localpath", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), dropResource.Value.DropDirectory));
             }
         }
 

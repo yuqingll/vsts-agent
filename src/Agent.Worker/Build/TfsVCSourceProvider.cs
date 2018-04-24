@@ -520,6 +520,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             return path;
         }
 
+        public override void MigrateSourceDirectory(IExecutionContext executionContext, string currentSourceDir, string targetSourceDir)
+        {
+            // invoke tf.exe to delete the workspace since .tf directory is not movable.
+            DestroySourceDirectory(executionContext, currentSourceDir);
+        }
+
+        public override void DestroySourceDirectory(IExecutionContext executionContext, string sourceDir)
+        {
+            // invoke tf.exe to delete the workspace since .tf directory is not movable.
+            executionContext.Debug($"Destroy current {this.RepositoryType} source directory under '{sourceDir}'.");
+            // DestroyTFVCSourceDirectory();
+        }
+
         public override void SetVariablesInEndpoint(IExecutionContext executionContext, ServiceEndpoint endpoint)
         {
             base.SetVariablesInEndpoint(executionContext, endpoint);

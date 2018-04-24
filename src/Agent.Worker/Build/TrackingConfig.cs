@@ -12,11 +12,15 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
     public sealed class ResourceTrackingConfig
     {
+        public ResourceTrackingConfig()
+        { }
+
         public ResourceTrackingConfig(IExecutionContext executionContext, string resourcesRoot)
         {
+            // tracking repository resources
             if (executionContext.Repositories.Count > 0)
             {
-                SourcesDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.SourcesDirectory);
+                SourcesDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.SourcesDirectory);  // 1/s dir
 
                 // if there is one repository, we will keep using the layout format we have today, _work/1/s 
                 // if there are multiple repositories, we will put each repository under the sub-dir of its alias, _work/1/s/self
@@ -27,8 +31,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                     {
                         RepositoryType = repo.Type,
                         RepositoryUrl = repo.Url.AbsoluteUri,
-                        SourceDirectory = SourcesDirectory,
-                        RepositoryDirectory = SourcesDirectory
+                        SourceDirectory = SourcesDirectory
                     };
 
                     if (repo.Properties.Get<bool>("sharerepository"))
@@ -45,21 +48,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                         {
                             RepositoryType = repo.Type,
                             RepositoryUrl = repo.Url.AbsoluteUri,
-                            SourceDirectory = Path.Combine(SourcesDirectory, repo.Alias),
-                            RepositoryDirectory = SourcesDirectory
+                            SourceDirectory = Path.Combine(SourcesDirectory, repo.Alias)
                         };
-
-                        if (repo.Properties.Get<bool>("sharerepository"))
-                        {
-                            throw new NotSupportedException("sharerepository");
-                        }
                     }
                 }
             }
 
+            // tracking build drop resources
             if (executionContext.Builds.Count > 0)
             {
-                DropsDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.DropsDirectory);
+                DropsDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.DropsDirectory);  // 1/d dir
                 // if there is one build drop, we will keep using the layout format we have today, _work/1/d 
                 // if there are multiple build drops, we will put each build drop under the sub-dir of its alias, _work/1/d/L0
                 if (executionContext.Builds.Count == 1)
@@ -135,7 +133,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
     {
         public string RepositoryUrl { get; set; }
         public string RepositoryType { get; set; }
-        public string RepositoryDirectory { get; set; }
         public string SourceDirectory { get; set; }
 
         [JsonIgnore]
@@ -261,7 +258,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         }
 
         public TrackingConfig(
-            IExecutionContext executionContext,
+            IExecutionContext executionContext, 
             int buildDirectory,
             string hashKey)
         {

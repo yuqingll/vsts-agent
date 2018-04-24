@@ -7,4 +7,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         Binary,
         All,
     }
+
+    public enum WorkspaceCleanOption
+    {
+        None,
+        Resource,
+        Binary,
+        All,
+    }
 }

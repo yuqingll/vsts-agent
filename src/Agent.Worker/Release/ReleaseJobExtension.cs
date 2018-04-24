@@ -283,6 +283,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Release
 
         public override void InitializeJobExtension(IExecutionContext executionContext)
         {
+            InitializeJobExtensionLegacy(executionContext);
+        }
+
+        public override void InitializeJobExtensionLegacy(IExecutionContext executionContext)
+        {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));
 

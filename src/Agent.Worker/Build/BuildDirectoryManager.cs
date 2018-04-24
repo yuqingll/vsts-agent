@@ -97,17 +97,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                     // populate the self repo into the tracking file.
                     Trace.Info("Populate self repository info for the first time.");
                     var selfRepo = executionContext.Repositories.Single(x => string.Equals(x.Alias, "self", StringComparison.OrdinalIgnoreCase));
-                    newConfig.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
+                    newConfig.Resources = new ResourceTrackingConfig();
+                    newConfig.Resources.Repositories[selfRepo.Alias] = new RepositoryTrackingConfig()
                     {
                         RepositoryType = selfRepo.Type,
                         RepositoryUrl = selfRepo.Url.AbsoluteUri,
                         SourceDirectory = newConfig.SourcesDirectory
                     };
+
                     newConfig.FileFormatVersion = 4;
                 }
 
                 // Update repositories tracking information for each repository
-                trackingManager.UpdateRepositories(executionContext, newConfig);
+                trackingManager.UpdateResourcesTracking(executionContext, newConfig);
 
                 // For existing tracking config files, update the job run properties.
                 Trace.Verbose("Updating job run properties.");
@@ -122,25 +124,27 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             }
 
             // Prepare the build directory.
-            // There are 2 ways to provide build directory clean policy.
-            //     1> set definition variable build.clean or agent.clean.buildDirectory. (on-prem user need to use this, since there is no Web UI in TFS 2016)
-            //     2> select source clean option in definition repository tab. (VSTS will have this option in definition designer UI)
-            BuildCleanOption overallCleanOption = GetBuildDirectoryCleanOption(executionContext, executionContext.Repositories.Single(x => x.Alias == "self"));
+            WorkspaceCleanOption? workspaceCleanOption = EnumUtil.TryParse<WorkspaceCleanOption>(executionContext.Variables.Get("system.workspace.cleanoption"));
             CreateDirectory(
                 executionContext,
                 description: "source directory",
                 path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.SourcesDirectory),
-                deleteExisting: overallCleanOption == BuildCleanOption.Source);
+                deleteExisting: workspaceCleanOption == WorkspaceCleanOption.Resource);
+            CreateDirectory(
+                executionContext,
+                description: "drop directory",
+                path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.DropsDirectory),
+                deleteExisting: workspaceCleanOption == WorkspaceCleanOption.Resource);
             CreateDirectory(
                 executionContext,
                 description: "build directory",
                 path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory),
-                deleteExisting: overallCleanOption == BuildCleanOption.All);
+                deleteExisting: workspaceCleanOption == WorkspaceCleanOption.All);
             CreateDirectory(
                 executionContext,
                 description: "binaries directory",
                 path: Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.BuildDirectory, Constants.Build.Path.BinariesDirectory),
-                deleteExisting: overallCleanOption == BuildCleanOption.Binary);
+                deleteExisting: workspaceCleanOption == WorkspaceCleanOption.Binary);
             CreateDirectory(
                 executionContext,
                 description: "artifacts directory",
@@ -155,7 +159,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             foreach (var repo in executionContext.Repositories)
             {
                 BuildCleanOption cleanOption = GetBuildDirectoryCleanOption(executionContext, repo);
-                string sourceDirectory = Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.Repositories[repo.Alias].SourceDirectory);
+                string sourceDirectory = Path.Combine(IOUtil.GetWorkPath(HostContext), newConfig.Resources.Repositories[repo.Alias].SourceDirectory);
                 CreateDirectory(
                     executionContext,
                     description: $"source directory {repo.Alias}",
@@ -590,12 +594,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         //      Recreate source dir if clean=src is set.
         private BuildCleanOption GetBuildDirectoryCleanOption(IExecutionContext executionContext, Pipelines.RepositoryResource repository)
         {
-            BuildCleanOption? cleanOption = executionContext.Variables.Build_Clean;
-            if (cleanOption != null)
-            {
-                return cleanOption.Value;
-            }
-
             bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
             if (clean)
             {
@@ -603,17 +601,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 RepositoryCleanOptions? cleanOptionFromEndpoint = EnumUtil.TryParse<RepositoryCleanOptions>(cleanOptionData);
                 if (cleanOptionFromEndpoint != null)
                 {
-                    if (cleanOptionFromEndpoint == RepositoryCleanOptions.AllBuildDir)
-                    {
-                        return BuildCleanOption.All;
-                    }
-                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceDir)
+                    if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceDir)
                     {
                         return BuildCleanOption.Source;
-                    }
-                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceAndOutput)
-                    {
-                        return BuildCleanOption.Binary;
                     }
                 }
             }
