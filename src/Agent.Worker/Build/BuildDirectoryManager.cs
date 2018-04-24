@@ -15,6 +15,21 @@ using System.Security.Cryptography;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
+
+    // [ServiceLocator(Default = typeof(ResourceDirectoryManager))]
+    // public interface IResourceDirectoryManager : IAgentService
+    // {
+    //     ResourceTrackingConfig PrepareResourceDirectory(IExecutionContext executionContext);
+    // }
+
+    // public class ResourceDirectoryManager : AgentService, IResourceDirectoryManager
+    // {
+    //     public ResourceTrackingConfig PrepareResourceDirectory(IExecutionContext executionContext)
+    //     {
+
+    //     }
+    // }
+
     [ServiceLocator(Default = typeof(BuildDirectoryManager))]
     public interface IBuildDirectoryManager : IAgentService
     {
@@ -27,7 +42,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         void CreateDirectory(
             IExecutionContext executionContext,
-            string description, string path,
+            string description,
+            string path,
             bool deleteExisting);
     }
 

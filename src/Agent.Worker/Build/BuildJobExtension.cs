@@ -264,7 +264,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
                 if (string.Equals(triggerResourceType, "repository", StringComparison.OrdinalIgnoreCase))
                 {
-                    executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
+                    executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.SourcesDirectory));
                     executionContext.Variables.Set(Constants.Variables.System.DefaultWorkingDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[triggerResourceName].SourceDirectory));
                     executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[triggerResourceName].SourceDirectory));
                     foreach (var repo in executionContext.Repositories)

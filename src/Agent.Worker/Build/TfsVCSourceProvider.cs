@@ -530,7 +530,67 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         {
             // invoke tf.exe to delete the workspace since .tf directory is not movable.
             executionContext.Debug($"Destroy current {this.RepositoryType} source directory under '{sourceDir}'.");
-            // DestroyTFVCSourceDirectory();
+
+            //  // Create the tf command manager.
+            // var tf = HostContext.CreateService<ITfsVCCommandManager>();
+            // tf.CancellationToken = CancellationToken.None;
+            // tf.Endpoint = endpoint;
+            // tf.ExecutionContext = executionContext;
+
+            // // Get the workspaces.
+            // executionContext.Output(StringUtil.Loc("QueryingWorkspaceInfo"));
+            // ITfsVCWorkspace[] tfWorkspaces = await tf.WorkspacesAsync();
+
+            // string buildDirectory = executionContext.Variables.Agent_BuildDirectory;
+            // ArgUtil.NotNullOrEmpty(buildDirectory, nameof(buildDirectory));
+            // string workspaceName = $"ws_{Path.GetFileName(buildDirectory)}_{settings.AgentId}";
+
+            // // Fixup the directory.
+            // directory = directory.TrimEnd('/', '\\');
+            // ArgUtil.NotNullOrEmpty(directory, nameof(directory));
+            // string directorySlash = $"{directory}{Path.DirectorySeparatorChar}";
+
+            // foreach (ITfsVCWorkspace tfWorkspace in tfWorkspaces ?? new ITfsVCWorkspace[0])
+            // {
+            //     // Attempt to match the workspace by name.
+            //     if (string.Equals(tfWorkspace.Name, name, StringComparison.OrdinalIgnoreCase))
+            //     {
+            //         // Try deleting the workspace from the server.
+            //         if (!(await tf.TryWorkspaceDeleteAsync(tfWorkspace)))
+            //         {
+            //             // Otherwise fallback to deleting the workspace from the local computer.
+            //             await tf.WorkspacesRemoveAsync(tfWorkspace);
+            //         }
+
+            //         // Continue iterating over the rest of the workspaces.
+            //         continue;
+            //     }
+
+            //     // Attempt to match the workspace by local path.
+            //     foreach (ITfsVCMapping tfMapping in tfWorkspace.Mappings ?? new ITfsVCMapping[0])
+            //     {
+            //         // Skip cloaks.
+            //         if (tfMapping.Cloak)
+            //         {
+            //             continue;
+            //         }
+
+            //         if (string.Equals(tfMapping.LocalPath, directory, StringComparison.CurrentCultureIgnoreCase) ||
+            //             (tfMapping.LocalPath ?? string.Empty).StartsWith(directorySlash, StringComparison.CurrentCultureIgnoreCase))
+            //         {
+            //             // Try deleting the workspace from the server.
+            //             if (!(await tf.TryWorkspaceDeleteAsync(tfWorkspace)))
+            //             {
+            //                 // Otherwise fallback to deleting the workspace from the local computer.
+            //                 await tf.WorkspacesRemoveAsync(tfWorkspace);
+            //             }
+
+            //             // Break out of this nested for loop only.
+            //             // Continue iterating over the rest of the workspaces.
+            //             break;
+            //         }
+            //     }
+            // }
         }
 
         public override void SetVariablesInEndpoint(IExecutionContext executionContext, ServiceEndpoint endpoint)

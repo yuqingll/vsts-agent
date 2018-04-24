@@ -258,7 +258,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         }
 
         public TrackingConfig(
-            IExecutionContext executionContext, 
+            IExecutionContext executionContext,
             int buildDirectory,
             string hashKey)
         {

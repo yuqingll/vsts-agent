@@ -20,7 +20,7 @@ namespace Agent.DropPlugin
             executionContext.Debug(executionContext.Properties.Count.ToString());
             executionContext.Debug(executionContext.Data);
 
-            executionContext.Fail(new InvalidOperationException("SomethingHappened!").ToString());
+            //executionContext.Fail(new InvalidOperationException("SomethingHappened!").ToString());
 
             return Task.CompletedTask;
         }
