@@ -37,6 +37,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         // Anything job extension want to do before building the steps list.
         public abstract void InitializeJobExtension(IExecutionContext context);
 
+        // Anything job extension want to do before building the steps list. (Legacy doesn't supoort resource tracking)
+        public abstract void InitializeJobExtensionLegacy(IExecutionContext context);
+
         // Anything job extension want to add to pre-job steps list. This will be deprecated when GetSource move to a task.
         public abstract IStep GetExtensionPreJobStep(IExecutionContext jobContext);
 
@@ -69,7 +72,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
                     // Give job extension a chance to initialize
                     Trace.Info($"Run initial step from extension {this.GetType().Name}.");
-                    InitializeJobExtension(context);
+                    if (message.Resources.Repositories.Count > 0)
+                    {
+                        // Support tracking different number of resources, repository/drop/package
+                        InitializeJobExtension(context);
+                    }
+                    else
+                    {
+                        // Build only track 1 repository and RM only track 1 artifact
+                        InitializeJobExtensionLegacy(context);
+                    }
 
                     // Download tasks if not already in the cache
                     Trace.Info("Downloading task definitions.");

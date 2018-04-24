@@ -172,6 +172,15 @@ namespace Microsoft.VisualStudio.Services.Agent
             }
         }
 
+        public static class Resource
+        {
+            public static class Path
+            {
+                public static readonly string SourcesDirectory = "s";
+                public static readonly string DropsDirectory = "d";
+            }
+        }
+
         public static class Configuration
         {
             public static readonly string PAT = "PAT";

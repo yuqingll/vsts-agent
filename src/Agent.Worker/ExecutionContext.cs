@@ -26,6 +26,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         List<ServiceEndpoint> Endpoints { get; }
         List<SecureFile> SecureFiles { get; }
         List<Pipelines.RepositoryResource> Repositories { get; }
+        List<Pipelines.BuildResource> Builds { get; }
+
         PlanFeatures Features { get; }
         Variables Variables { get; }
         Variables TaskVariables { get; }
@@ -81,6 +83,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public List<ServiceEndpoint> Endpoints { get; private set; }
         public List<SecureFile> SecureFiles { get; private set; }
         public List<Pipelines.RepositoryResource> Repositories { get; private set; }
+        public List<Pipelines.BuildResource> Builds { get; private set; }
         public Variables Variables { get; private set; }
         public Variables TaskVariables { get; private set; }
         public HashSet<string> OutputVariables => _outputvariables;
@@ -142,6 +145,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             child.Variables = Variables;
             child.Endpoints = Endpoints;
             child.Repositories = Repositories;
+            child.Builds = Builds;
             child.SecureFiles = SecureFiles;
             child.TaskVariables = taskVariables;
             child._cancellationTokenSource = new CancellationTokenSource();
@@ -360,6 +364,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Repositories
             Repositories = message.Resources.Repositories;
+
+            // Builds
+            Builds = new List<Pipelines.BuildResource>(); // TODO: Build resource will coming down from job message.
 
             // Variables (constructor performs initial recursive expansion)
             List<string> warnings;

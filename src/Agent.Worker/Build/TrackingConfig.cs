@@ -10,10 +10,132 @@ using System.Linq;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
+    public sealed class ResourceTrackingConfig
+    {
+        public ResourceTrackingConfig(IExecutionContext executionContext, string resourcesRoot)
+        {
+            if (executionContext.Repositories.Count > 0)
+            {
+                SourcesDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.SourcesDirectory);
+
+                // if there is one repository, we will keep using the layout format we have today, _work/1/s 
+                // if there are multiple repositories, we will put each repository under the sub-dir of its alias, _work/1/s/self
+                if (executionContext.Repositories.Count == 1)
+                {
+                    var repo = executionContext.Repositories[0];
+                    Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                    {
+                        RepositoryType = repo.Type,
+                        RepositoryUrl = repo.Url.AbsoluteUri,
+                        SourceDirectory = SourcesDirectory,
+                        RepositoryDirectory = SourcesDirectory
+                    };
+
+                    if (repo.Properties.Get<bool>("sharerepository"))
+                    {
+                        throw new NotSupportedException("sharerepository");
+                    }
+                }
+                else
+                {
+                    // multiple repositories
+                    foreach (var repo in executionContext.Repositories)
+                    {
+                        Repositories[repo.Alias] = new RepositoryTrackingConfig()
+                        {
+                            RepositoryType = repo.Type,
+                            RepositoryUrl = repo.Url.AbsoluteUri,
+                            SourceDirectory = Path.Combine(SourcesDirectory, repo.Alias),
+                            RepositoryDirectory = SourcesDirectory
+                        };
+
+                        if (repo.Properties.Get<bool>("sharerepository"))
+                        {
+                            throw new NotSupportedException("sharerepository");
+                        }
+                    }
+                }
+            }
+
+            if (executionContext.Builds.Count > 0)
+            {
+                DropsDirectory = Path.Combine(resourcesRoot, Constants.Resource.Path.DropsDirectory);
+                // if there is one build drop, we will keep using the layout format we have today, _work/1/d 
+                // if there are multiple build drops, we will put each build drop under the sub-dir of its alias, _work/1/d/L0
+                if (executionContext.Builds.Count == 1)
+                {
+                    var build = executionContext.Builds[0];
+                    Drops[build.Alias] = new DropTrackingConfig()
+                    {
+                        DropType = build.Type,
+                        DropVersion = build.Version,
+                        DropDirectory = DropsDirectory
+                    };
+                }
+                else
+                {
+                    // multiple repositories
+                    foreach (var build in executionContext.Builds)
+                    {
+                        Drops[build.Alias] = new DropTrackingConfig()
+                        {
+                            DropType = build.Type,
+                            DropVersion = build.Version,
+                            DropDirectory = Path.Combine(SourcesDirectory, build.Alias)
+                        };
+                    }
+                }
+            }
+        }
+
+        private Dictionary<string, RepositoryTrackingConfig> _repositories;
+        private Dictionary<string, DropTrackingConfig> _drops;
+
+        [JsonProperty("build_sourcesdirectory")]
+        public string SourcesDirectory { get; set; }
+
+        [JsonProperty("build_dropsdirectory")]
+        public string DropsDirectory { get; set; }
+
+        [JsonProperty("build_repositories")]
+        public Dictionary<string, RepositoryTrackingConfig> Repositories
+        {
+            get
+            {
+                if (_repositories == null)
+                {
+                    _repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+                }
+                return _repositories;
+            }
+        }
+
+        [JsonProperty("build_drops")]
+        public Dictionary<string, DropTrackingConfig> Drops
+        {
+            get
+            {
+                if (_drops == null)
+                {
+                    _drops = new Dictionary<string, DropTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+                }
+                return _drops;
+            }
+        }
+    }
+
+    public sealed class DropTrackingConfig
+    {
+        public string DropVersion { get; set; }
+        public string DropType { get; set; }
+        public string DropDirectory { get; set; }
+    }
+
     public sealed class RepositoryTrackingConfig
     {
         public string RepositoryUrl { get; set; }
         public string RepositoryType { get; set; }
+        public string RepositoryDirectory { get; set; }
         public string SourceDirectory { get; set; }
 
         [JsonIgnore]
@@ -67,7 +189,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
     public sealed class TrackingConfig : TrackingConfigBase
     {
-        private Dictionary<string, RepositoryTrackingConfig> _repositories;
         public const string FileFormatVersionJsonProperty = "fileFormatVersion";
 
         // The parameterless constructor is required for deserialization.
@@ -148,34 +269,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             BuildDirectory = buildDirectory.ToString(CultureInfo.InvariantCulture);
             ArtifactsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.ArtifactsDirectory);
             TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
-            SourcesDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.SourcesDirectory);
-
-            // if there is one repository, we will keep using the layout format we have today, _work/1/s 
-            // if there are multiple repositories, we will put each repository under the sub-dir of its alias, _work/1/s/self
-            if (executionContext.Repositories.Count == 1)
-            {
-                // make sure the only repo is self
-                var repo = executionContext.Repositories.Single(x => x.Alias == "self");
-                Repositories[repo.Alias] = new RepositoryTrackingConfig()
-                {
-                    RepositoryType = repo.Type,
-                    RepositoryUrl = repo.Url.AbsoluteUri,
-                    SourceDirectory = SourcesDirectory
-                };
-            }
-            else
-            {
-                // multiple repositories
-                foreach (var repo in executionContext.Repositories)
-                {
-                    Repositories[repo.Alias] = new RepositoryTrackingConfig()
-                    {
-                        RepositoryType = repo.Type,
-                        RepositoryUrl = repo.Url.AbsoluteUri,
-                        SourceDirectory = Path.Combine(SourcesDirectory, repo.Alias)
-                    };
-                }
-            }
+            Resources = new ResourceTrackingConfig(executionContext, BuildDirectory);
 
             // Set the other properties.
             CollectionId = executionContext.Variables.System_CollectionId;
@@ -206,7 +300,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             set
             {
                 // Version 4 changes:
-                //   Multi-Repositories support was added.
+                //   Multi-type resources tracking support was added.
                 // Version 3 changes:
                 //   CollectionName was removed.
                 //   CollectionUrl was added.
@@ -303,18 +397,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         [JsonProperty("common_testresultsdirectory")]
         public string TestResultsDirectory { get; set; }
 
-        [JsonProperty("build_repositories")]
-        public Dictionary<string, RepositoryTrackingConfig> Repositories
-        {
-            get
-            {
-                if (_repositories == null)
-                {
-                    _repositories = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
-                }
-                return _repositories;
-            }
-        }
+        [JsonProperty("build_resources")]
+        public ResourceTrackingConfig Resources { get; set; }
 
         public void UpdateJobRunProperties(IExecutionContext executionContext)
         {
