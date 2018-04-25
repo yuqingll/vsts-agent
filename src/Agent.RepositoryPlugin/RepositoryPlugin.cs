@@ -43,6 +43,7 @@ namespace Agent.RepositoryPlugin
         {
             var repoAlias = executionContext.GetInput("repository", true);
             var repo = executionContext.Repositories.Single(x => string.Equals(x.Alias, repoAlias, StringComparison.OrdinalIgnoreCase));
+
             ISourceProvider sourceProvider = null;
             switch (repo.Type)
             {
@@ -58,10 +59,10 @@ namespace Agent.RepositoryPlugin
                     sourceProvider = new TfsGitSourceProvider();
                     break;
                 case RepositoryTypes.TfsVersionControl:
-                    //sourceProvider = new BitbucketSourceProvider();
+                    sourceProvider = new TfsVCSourceProvider();
                     break;
                 case RepositoryTypes.Svn:
-                    //sourceProvider = new BitbucketSourceProvider();
+                    sourceProvider = new SvnSourceProvider();
                     break;
                 default:
                     throw new NotSupportedException(repo.Type);
@@ -74,6 +75,59 @@ namespace Agent.RepositoryPlugin
             else if (executionContext.Stage == "post")
             {
                 await sourceProvider.PostJobCleanupAsync(executionContext, repo);
+            }
+        }
+
+        private void MergeInputs(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository)
+        {
+            string clean = executionContext.GetInput("clean");
+            if (!string.IsNullOrEmpty(clean))
+            {
+                repository.Properties.Set<bool>("clean", StringUtil.ConvertToBoolean(clean));
+            }
+
+            // there is no addition inputs for TFVC and SVN
+            if (repository.Type == RepositoryTypes.Bitbucket ||
+                repository.Type == RepositoryTypes.GitHub ||
+                repository.Type == RepositoryTypes.GitHubEnterprise ||
+                repository.Type == RepositoryTypes.Git ||
+                repository.Type == RepositoryTypes.TfsGit)
+            {
+                string checkoutSubmodules = executionContext.GetInput("checkoutSubmodules");
+                if (!string.IsNullOrEmpty(checkoutSubmodules))
+                {
+                    repository.Properties.Set<bool>("checkoutSubmodules", StringUtil.ConvertToBoolean(checkoutSubmodules));
+                }
+
+                string checkoutNestedSubmodules = executionContext.GetInput("checkoutNestedSubmodules");
+                if (!string.IsNullOrEmpty(checkoutNestedSubmodules))
+                {
+                    repository.Properties.Set<bool>("checkoutNestedSubmodules", StringUtil.ConvertToBoolean(checkoutNestedSubmodules));
+                }
+
+                string preserveCredential = executionContext.GetInput("preserveCredential");
+                if (!string.IsNullOrEmpty(preserveCredential))
+                {
+                    repository.Properties.Set<bool>("preserveCredential", StringUtil.ConvertToBoolean(preserveCredential));
+                }
+
+                string gitLfsSupport = executionContext.GetInput("gitLfsSupport");
+                if (!string.IsNullOrEmpty(gitLfsSupport))
+                {
+                    repository.Properties.Set<bool>("gitLfsSupport", StringUtil.ConvertToBoolean(gitLfsSupport));
+                }
+
+                string acceptUntrustedCerts = executionContext.GetInput("acceptUntrustedCerts");
+                if (!string.IsNullOrEmpty(acceptUntrustedCerts))
+                {
+                    repository.Properties.Set<bool>("acceptUntrustedCerts", StringUtil.ConvertToBoolean(acceptUntrustedCerts));
+                }
+
+                string fetchDepth = executionContext.GetInput("fetchDepth");
+                if (!string.IsNullOrEmpty(fetchDepth))
+                {
+                    repository.Properties.Set<string>("fetchDepth", fetchDepth);
+                }
             }
         }
     }

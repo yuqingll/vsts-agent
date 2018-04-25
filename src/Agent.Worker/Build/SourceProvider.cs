@@ -75,20 +75,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         public virtual void MigrateSourceDirectory(IExecutionContext executionContext, string currentSourceDir, string targetSourceDir)
         {
-            // move current /s to /s/self since we have more repositories need to stored
-            executionContext.Debug($"Move current source directory from '{currentSourceDir}' to '{targetSourceDir}'");
-            var stagingDir = Path.Combine(executionContext.Variables.Agent_TempDirectory, Guid.NewGuid().ToString("D"));
-            try
-            {
-                Directory.Move(currentSourceDir, stagingDir);
-                Directory.Move(stagingDir, targetSourceDir);
-            }
-            catch (Exception ex)
-            {
-                Trace.Error(ex);
-                // if we can't move the folder and we can't delete the folder, just fail the job.
-                IOUtil.DeleteDirectory(currentSourceDir, CancellationToken.None);
-            }
+            
         }
 
         public virtual void DestroySourceDirectory(IExecutionContext executionContext, string sourceDir)

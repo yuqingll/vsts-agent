@@ -151,6 +151,13 @@ namespace Microsoft.VisualStudio.Services.Agent
                 public static readonly string DeploymentAgentConfiguration = "DeploymentAgentConfiguration";
                 public static readonly string SharedDeploymentAgentConfiguration = "SharedDeploymentAgentConfiguration";
             }
+
+            public static class Path
+            {
+                public static readonly string JobRootMappingDirectory = "JobRootMapping";
+                public static readonly string TopLevelTrackingConfigFile = "Mappings.json";
+                public static readonly string TrackingConfigFile = "JobFolder.json";
+            }
         }
 
         public static class Build

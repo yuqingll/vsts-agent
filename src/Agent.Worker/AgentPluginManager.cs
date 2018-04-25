@@ -15,7 +15,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     [ServiceLocator(Default = typeof(AgentPluginManager))]
     public interface IAgentPluginManager : IAgentService
     {
-        Dictionary<Guid, Definition> SupportedTasks { get; }
+        Dictionary<Guid, Dictionary<string, Definition>> SupportedTasks { get; }
         Dictionary<string, HashSet<string>> SupportedLoggingCommands { get; }
 
         Task RunPluginTaskAsync(IExecutionContext context, Guid taskId, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler);
@@ -25,11 +25,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public sealed class AgentPluginManager : AgentService, IAgentPluginManager
     {
         private readonly Dictionary<string, HashSet<string>> _supportedLoggingCommands = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<Guid, Definition> _supportedTasks = new Dictionary<Guid, Definition>();
+        private readonly Dictionary<Guid, Dictionary<string, Definition>> _supportedTasks = new Dictionary<Guid, Dictionary<string, Definition>>();
         private readonly Dictionary<string, Dictionary<string, AgentPluginInfo>> _loggingCommandAgentPlugins = new Dictionary<string, Dictionary<string, AgentPluginInfo>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Guid, AgentPluginInfo> _taskAgentPlugins = new Dictionary<Guid, AgentPluginInfo>();
         public Dictionary<string, HashSet<string>> SupportedLoggingCommands => _supportedLoggingCommands;
-        public Dictionary<Guid, Definition> SupportedTasks => _supportedTasks;
+        public Dictionary<Guid, Dictionary<string, Definition>> SupportedTasks => _supportedTasks;
 
         public override void Initialize(IHostContext hostContext)
         {
@@ -53,7 +53,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 AgentPluginEntryPointClass = "Agent.RepositoryPlugin.CheckoutTask"
             };
 
-            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId] = new Definition() { Directory = HostContext.GetDirectory(WellKnownDirectory.Work) };
+            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId] = new Dictionary<string, Definition>(StringComparer.OrdinalIgnoreCase);
 
             IAgentTaskPlugin taskPlugin = null;
             string typeName = $"{_taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginEntryPointClass}, {_taskAgentPlugins[WellKnownAgentPluginTasks.CheckoutTaskId].AgentPluginAssembly}";
@@ -69,7 +69,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             Util.ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
-            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data = new DefinitionData()
+            Util.ArgUtil.NotNullOrEmpty(taskPlugin.Version, nameof(taskPlugin.Version));
+            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId][taskPlugin.Version] = new Definition() { Directory = HostContext.GetDirectory(WellKnownDirectory.Work) };
+            _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId][taskPlugin.Version].Data = new DefinitionData()
             {
                 Author = taskPlugin.Author,
                 Description = taskPlugin.Description,
@@ -80,7 +82,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             if (taskPlugin.Stages.Contains("pre"))
             {
-                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.PreJobExecution = new ExecutionData()
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId][taskPlugin.Version].Data.PreJobExecution = new ExecutionData()
                 {
                     AgentPlugin = new AgentPluginHandlerData()
                     {
@@ -93,7 +95,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             if (taskPlugin.Stages.Contains("main"))
             {
-                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.Execution = new ExecutionData()
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId][taskPlugin.Version].Data.Execution = new ExecutionData()
                 {
                     AgentPlugin = new AgentPluginHandlerData()
                     {
@@ -106,7 +108,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             if (taskPlugin.Stages.Contains("post"))
             {
-                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId].Data.PostJobExecution = new ExecutionData()
+                _supportedTasks[WellKnownAgentPluginTasks.CheckoutTaskId][taskPlugin.Version].Data.PostJobExecution = new ExecutionData()
                 {
                     AgentPlugin = new AgentPluginHandlerData()
                     {
@@ -288,43 +290,5 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public static class WellKnownAgentPluginTasks
     {
         public static Guid CheckoutTaskId = new Guid("c61807ba-5e20-4b70-bd8c-3683c9f74003");
-
-        public static Definition CheckoutTask = new Definition()
-        {
-            Directory = string.Empty,
-            Data = new DefinitionData()
-            {
-                Author = "Ting",
-                Description = "Checkout",
-                HelpMarkDown = "Call Ting",
-                FriendlyName = "Get Source",
-                Inputs = new TaskInputDefinition[]
-                {
-                    new TaskInputDefinition()
-                    {
-                        Name="repository",
-                        InputType = TaskInputType.String,
-                        DefaultValue="self",
-                        Required=true
-                    }
-                },
-                Execution = new ExecutionData()
-                {
-                    AgentPlugin = new AgentPluginHandlerData()
-                    {
-                        Target = "Agent.RepositoryPlugin.dll",
-                        EntryPoint = "AgentRepositoryCheckoutPlugin"
-                    }
-                },
-                PostJobExecution = new ExecutionData()
-                {
-                    AgentPlugin = new AgentPluginHandlerData()
-                    {
-                        Target = "Agent.RepositoryPlugin.dll",
-                        EntryPoint = "AgentRepositoryCleanupPlugin"
-                    }
-                }
-            }
-        };
     }
 }

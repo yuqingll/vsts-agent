@@ -15,42 +15,65 @@ using System.Security.Cryptography;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
-
-    // [ServiceLocator(Default = typeof(ResourceDirectoryManager))]
-    // public interface IResourceDirectoryManager : IAgentService
-    // {
-    //     ResourceTrackingConfig PrepareResourceDirectory(IExecutionContext executionContext);
-    // }
-
-    // public class ResourceDirectoryManager : AgentService, IResourceDirectoryManager
-    // {
-    //     public ResourceTrackingConfig PrepareResourceDirectory(IExecutionContext executionContext)
-    //     {
-
-    //     }
-    // }
-
     [ServiceLocator(Default = typeof(BuildDirectoryManager))]
-    public interface IBuildDirectoryManager : IAgentService
+    public interface IBuildDirectoryManager : IDirectoryManager
     {
-        TrackingConfig PrepareDirectory(
-            IExecutionContext executionContext,
-            ServiceEndpoint endpoint,
-            ISourceProvider sourceProvider);
-
-        TrackingConfig PrepareDirectory(IExecutionContext executionContext);
-
-        void CreateDirectory(
-            IExecutionContext executionContext,
-            string description,
-            string path,
-            bool deleteExisting);
     }
 
-    public sealed class BuildDirectoryManager : AgentService, IBuildDirectoryManager, IMaintenanceServiceProvider
+    public sealed class BuildDirectoryManager : DirectoryManager, IMaintenanceServiceProvider
     {
         public string MaintenanceDescription => StringUtil.Loc("DeleteUnusedBuildDir");
         public Type ExtensionType => typeof(IMaintenanceServiceProvider);
+
+        public override TrackingConfig ConvertLegacyTrackingConfig(IExecutionContext executionContext)
+        {
+            // Convert build single repository tracking file into the system tracking file that support tracking multiple resources.
+            // Step 1. convert 1.x agent tracking file to 2.x agent version
+            // Step 2. convert single repo tracking file to multi-resources tracking file.
+            string trackingFile = Path.Combine(
+                IOUtil.GetWorkPath(HostContext),
+                Constants.Build.Path.SourceRootMappingDirectory,
+                executionContext.Variables.System_CollectionId,
+                executionContext.Variables.System_DefinitionId,
+                Constants.Build.Path.TrackingConfigFile);
+            Trace.Verbose($"Loading tracking config if exists: {trackingFile}");
+
+        }
+
+        public override void PrepareDirectory(IExecutionContext executionContext, TrackingConfig trackingConfig)
+        {
+            // Validate parameters.
+            Trace.Entering();
+            ArgUtil.NotNull(executionContext, nameof(executionContext));
+            ArgUtil.NotNull(trackingConfig, nameof(trackingConfig));
+
+            // Prepare additional build directory.
+            WorkspaceCleanOption? workspaceCleanOption = EnumUtil.TryParse<WorkspaceCleanOption>(executionContext.Variables.Get("system.workspace.cleanoption"));
+            string binaryDir = Path.Combine(IOUtil.GetWorkPath(HostContext), Path.Combine(trackingConfig.JobDirectory, Constants.Build.Path.BinariesDirectory));
+            string artifactDir = Path.Combine(IOUtil.GetWorkPath(HostContext), Path.Combine(trackingConfig.JobDirectory, Constants.Build.Path.ArtifactsDirectory));
+            string testResultDir = Path.Combine(IOUtil.GetWorkPath(HostContext), Path.Combine(trackingConfig.JobDirectory, Constants.Build.Path.TestResultsDirectory));
+            CreateDirectory(
+                executionContext,
+                description: "binaries directory",
+                path: binaryDir,
+                deleteExisting: workspaceCleanOption == WorkspaceCleanOption.Binary);
+            CreateDirectory(
+                executionContext,
+                description: "artifacts directory",
+                path: artifactDir,
+                deleteExisting: true);
+            CreateDirectory(
+                executionContext,
+                description: "test results directory",
+                path: testResultDir,
+                deleteExisting: true);
+
+            executionContext.Variables.Set(Constants.Variables.System.ArtifactsDirectory, artifactDir);
+            executionContext.Variables.Set(Constants.Variables.Build.StagingDirectory, artifactDir);
+            executionContext.Variables.Set(Constants.Variables.Build.ArtifactStagingDirectory, artifactDir);
+            executionContext.Variables.Set(Constants.Variables.Common.TestResultsDirectory, testResultDir);
+            executionContext.Variables.Set(Constants.Variables.Build.BinariesDirectory, binaryDir);
+        }
 
         public TrackingConfig PrepareDirectory(IExecutionContext executionContext)
         {

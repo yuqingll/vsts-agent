@@ -72,7 +72,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
                     // Give job extension a chance to initialize
                     Trace.Info($"Run initial step from extension {this.GetType().Name}.");
-                    if (message.Resources.Repositories.Count > 0)
+                    if (String.Equals(message.Plan.PlanType, "Build", StringComparison.OrdinalIgnoreCase))
                     {
                         // Support tracking different number of resources, repository/drop/package
                         InitializeJobExtension(context);

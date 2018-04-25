@@ -126,85 +126,87 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         }
 
 
-        // Prepare build directory
-        // Set all build related variables
+        // Deprecated for build
         public override void InitializeJobExtensionLegacy(IExecutionContext executionContext)
         {
-            // Validate args.
-            Trace.Entering();
-            ArgUtil.NotNull(executionContext, nameof(executionContext));
+            // Build should only use InitializeJobExtension
+            throw new NotSupportedException(nameof(InitializeJobExtensionLegacy));
 
-            // This flag can be false for jobs like cleanup artifacts.
-            // If syncSources = false, we will not set source related build variable, not create build folder, not sync source.
-            bool syncSources = executionContext.Variables.Build_SyncSources ?? true;
-            if (!syncSources)
-            {
-                Trace.Info($"{Constants.Variables.Build.SyncSources} = false, we will not set source related build variable, not create build folder and not sync source");
-                return;
-            }
+            // // Validate args.
+            // Trace.Entering();
+            // ArgUtil.NotNull(executionContext, nameof(executionContext));
 
-            // Get the repo endpoint and source provider.
-            if (!TrySetPrimaryEndpointAndProviderInfo(executionContext))
-            {
-                throw new Exception(StringUtil.Loc("SupportedRepositoryEndpointNotFound"));
-            }
+            // // This flag can be false for jobs like cleanup artifacts.
+            // // If syncSources = false, we will not set source related build variable, not create build folder, not sync source.
+            // bool syncSources = executionContext.Variables.Build_SyncSources ?? true;
+            // if (!syncSources)
+            // {
+            //     Trace.Info($"{Constants.Variables.Build.SyncSources} = false, we will not set source related build variable, not create build folder and not sync source");
+            //     return;
+            // }
 
-            executionContext.Debug($"Primary repository: {SourceEndpoint.Name}. repository type: {SourceProvider.RepositoryType}");
+            // // Get the repo endpoint and source provider.
+            // if (!TrySetPrimaryEndpointAndProviderInfo(executionContext))
+            // {
+            //     throw new Exception(StringUtil.Loc("SupportedRepositoryEndpointNotFound"));
+            // }
 
-            // Set the repo variables.
-            string repositoryId;
-            if (SourceEndpoint.Data.TryGetValue("repositoryId", out repositoryId)) // TODO: Move to const after source artifacts PR is merged.
-            {
-                executionContext.Variables.Set(Constants.Variables.Build.RepoId, repositoryId);
-            }
+            // executionContext.Debug($"Primary repository: {SourceEndpoint.Name}. repository type: {SourceProvider.RepositoryType}");
 
-            executionContext.Variables.Set(Constants.Variables.Build.RepoName, SourceEndpoint.Name);
-            executionContext.Variables.Set(Constants.Variables.Build.RepoProvider, SourceEndpoint.Type);
-            executionContext.Variables.Set(Constants.Variables.Build.RepoUri, SourceEndpoint.Url?.AbsoluteUri);
+            // // Set the repo variables.
+            // string repositoryId;
+            // if (SourceEndpoint.Data.TryGetValue("repositoryId", out repositoryId)) // TODO: Move to const after source artifacts PR is merged.
+            // {
+            //     executionContext.Variables.Set(Constants.Variables.Build.RepoId, repositoryId);
+            // }
 
-            string checkoutSubmoduleText;
-            if (SourceEndpoint.Data.TryGetValue(EndpointData.CheckoutSubmodules, out checkoutSubmoduleText))
-            {
-                executionContext.Variables.Set(Constants.Variables.Build.RepoGitSubmoduleCheckout, checkoutSubmoduleText);
-            }
+            // executionContext.Variables.Set(Constants.Variables.Build.RepoName, SourceEndpoint.Name);
+            // executionContext.Variables.Set(Constants.Variables.Build.RepoProvider, SourceEndpoint.Type);
+            // executionContext.Variables.Set(Constants.Variables.Build.RepoUri, SourceEndpoint.Url?.AbsoluteUri);
 
-            // overwrite primary repository's clean value if build.repository.clean is sent from server. this is used by tfvc gated check-in
-            bool? repoClean = executionContext.Variables.GetBoolean(Constants.Variables.Build.RepoClean);
-            if (repoClean != null)
-            {
-                SourceEndpoint.Data[EndpointData.Clean] = repoClean.Value.ToString();
-            }
-            else
-            {
-                string cleanRepoText;
-                if (SourceEndpoint.Data.TryGetValue(EndpointData.Clean, out cleanRepoText))
-                {
-                    executionContext.Variables.Set(Constants.Variables.Build.RepoClean, cleanRepoText);
-                }
-            }
+            // string checkoutSubmoduleText;
+            // if (SourceEndpoint.Data.TryGetValue(EndpointData.CheckoutSubmodules, out checkoutSubmoduleText))
+            // {
+            //     executionContext.Variables.Set(Constants.Variables.Build.RepoGitSubmoduleCheckout, checkoutSubmoduleText);
+            // }
 
-            // Prepare the build directory.
-            executionContext.Output(StringUtil.Loc("PrepareBuildDir"));
-            var directoryManager = HostContext.GetService<IBuildDirectoryManager>();
-            TrackingConfig trackingConfig = directoryManager.PrepareDirectory(
-                executionContext,
-                SourceEndpoint,
-                SourceProvider);
+            // // overwrite primary repository's clean value if build.repository.clean is sent from server. this is used by tfvc gated check-in
+            // bool? repoClean = executionContext.Variables.GetBoolean(Constants.Variables.Build.RepoClean);
+            // if (repoClean != null)
+            // {
+            //     SourceEndpoint.Data[EndpointData.Clean] = repoClean.Value.ToString();
+            // }
+            // else
+            // {
+            //     string cleanRepoText;
+            //     if (SourceEndpoint.Data.TryGetValue(EndpointData.Clean, out cleanRepoText))
+            //     {
+            //         executionContext.Variables.Set(Constants.Variables.Build.RepoClean, cleanRepoText);
+            //     }
+            // }
 
-            // Set the directory variables.
-            executionContext.Output(StringUtil.Loc("SetBuildVars"));
-            string _workDirectory = IOUtil.GetWorkPath(HostContext);
-            executionContext.Variables.Set(Constants.Variables.Agent.BuildDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory));
-            executionContext.Variables.Set(Constants.Variables.System.ArtifactsDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-            executionContext.Variables.Set(Constants.Variables.System.DefaultWorkingDirectory, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
-            executionContext.Variables.Set(Constants.Variables.Common.TestResultsDirectory, Path.Combine(_workDirectory, trackingConfig.TestResultsDirectory));
-            executionContext.Variables.Set(Constants.Variables.Build.BinariesDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory, Constants.Build.Path.BinariesDirectory));
-            executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
-            executionContext.Variables.Set(Constants.Variables.Build.StagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-            executionContext.Variables.Set(Constants.Variables.Build.ArtifactStagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-            executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
+            // // Prepare the build directory.
+            // executionContext.Output(StringUtil.Loc("PrepareBuildDir"));
+            // var directoryManager = HostContext.GetService<IBuildDirectoryManager>();
+            // TrackingConfig trackingConfig = directoryManager.PrepareDirectory(
+            //     executionContext,
+            //     SourceEndpoint,
+            //     SourceProvider);
 
-            SourceProvider.SetVariablesInEndpoint(executionContext, SourceEndpoint);
+            // // Set the directory variables.
+            // executionContext.Output(StringUtil.Loc("SetBuildVars"));
+            // string _workDirectory = IOUtil.GetWorkPath(HostContext);
+            // executionContext.Variables.Set(Constants.Variables.Agent.BuildDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory));
+            // executionContext.Variables.Set(Constants.Variables.System.ArtifactsDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
+            // executionContext.Variables.Set(Constants.Variables.System.DefaultWorkingDirectory, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Common.TestResultsDirectory, Path.Combine(_workDirectory, trackingConfig.TestResultsDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Build.BinariesDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory, Constants.Build.Path.BinariesDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Build.StagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Build.ArtifactStagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
+            // executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.SourcesDirectory));
+
+            // SourceProvider.SetVariablesInEndpoint(executionContext, SourceEndpoint);
         }
 
         // Prepare build directory
@@ -225,59 +227,36 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 return;
             }
 
+            Pipelines.RepositoryResource selfRepo = executionContext.Repositories.Single(x => string.Equals(x.Alias, "self", StringComparison.OrdinalIgnoreCase));
+            executionContext.Debug($"Primary repository: {selfRepo.Properties.Get<string>("name")}. repository type: {selfRepo.Type}");
+
             // Prepare the build directory.
             executionContext.Output(StringUtil.Loc("PrepareBuildDir"));
             var directoryManager = HostContext.GetService<IBuildDirectoryManager>();
             TrackingConfig trackingConfig = directoryManager.PrepareDirectory(executionContext);
 
-            // Set the directory variables.
-            // string triggeredResource = executionContext.Variables.Get("system.resources.trigger");
-            string triggerResourceType = "repository";
-            string triggerResourceName = "self";
-            if (string.Equals(triggerResourceType, "repository", StringComparison.OrdinalIgnoreCase))
+            // Set the primary repo variables.
+            executionContext.Output(StringUtil.Loc("SetBuildVars"));
+            string repositoryId = selfRepo.Id; // make sure Id is same as repositoryId, note: repositoryId can be guid, url and $/
+            if (!string.IsNullOrEmpty(repositoryId))
             {
-                // triggered resource is a repository
-                Pipelines.RepositoryResource triggeredRepository = executionContext.Repositories.Single(x => string.Equals(x.Alias, triggerResourceName, StringComparison.OrdinalIgnoreCase));
-                executionContext.Debug($"Primary repository: {triggeredRepository.Properties.Get<string>("name")}. repository type: {triggeredRepository.Type}");
-
-                // Set the primary repo variables.
-                string repositoryId = triggeredRepository.Id; // make sure Id is same as repositoryId, note: repositoryId can be guid, url and $/
-                if (!string.IsNullOrEmpty(repositoryId))
-                {
-                    executionContext.Variables.Set(Constants.Variables.Build.RepoId, repositoryId);
-                }
-
-                executionContext.Variables.Set(Constants.Variables.Build.RepoName, triggeredRepository.Properties.Get<string>("name") ?? string.Empty);
-                executionContext.Variables.Set(Constants.Variables.Build.RepoProvider, triggeredRepository.Type);
-                executionContext.Variables.Set(Constants.Variables.Build.RepoUri, triggeredRepository.Url?.AbsoluteUri);
-                executionContext.Variables.Set(Constants.Variables.Build.RepoGitSubmoduleCheckout, triggeredRepository.Properties.Get<bool>(RepositoryProperties.CheckoutNestedSubmodules).ToString());
-                executionContext.Variables.Set(Constants.Variables.Build.RepoClean, triggeredRepository.Properties.Get<bool>(EndpointData.Clean).ToString());
-
-                executionContext.Output(StringUtil.Loc("SetBuildVars"));
-                string _workDirectory = IOUtil.GetWorkPath(HostContext);
-                executionContext.Variables.Set(Constants.Variables.Agent.BuildDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory));
-                executionContext.Variables.Set(Constants.Variables.System.ArtifactsDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-                executionContext.Variables.Set(Constants.Variables.Common.TestResultsDirectory, Path.Combine(_workDirectory, trackingConfig.TestResultsDirectory));
-                executionContext.Variables.Set(Constants.Variables.Build.BinariesDirectory, Path.Combine(_workDirectory, trackingConfig.BuildDirectory, Constants.Build.Path.BinariesDirectory));
-                executionContext.Variables.Set(Constants.Variables.Build.StagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-                executionContext.Variables.Set(Constants.Variables.Build.ArtifactStagingDirectory, Path.Combine(_workDirectory, trackingConfig.ArtifactsDirectory));
-
-                if (string.Equals(triggerResourceType, "repository", StringComparison.OrdinalIgnoreCase))
-                {
-                    executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.SourcesDirectory));
-                    executionContext.Variables.Set(Constants.Variables.System.DefaultWorkingDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[triggerResourceName].SourceDirectory));
-                    executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[triggerResourceName].SourceDirectory));
-                    foreach (var repo in executionContext.Repositories)
-                    {
-                        executionContext.Variables.Set($"{Constants.Variables.Build.SourcesDirectory}.{repo.Alias}", Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[repo.Alias].SourceDirectory));
-                    }
-                }
+                executionContext.Variables.Set(Constants.Variables.Build.RepoId, repositoryId);
             }
-            else if (string.Equals(triggerResourceType, "build", StringComparison.OrdinalIgnoreCase))
+
+            executionContext.Variables.Set(Constants.Variables.Build.RepoName, selfRepo.Properties.Get<string>("name") ?? string.Empty);
+            executionContext.Variables.Set(Constants.Variables.Build.RepoProvider, selfRepo.Type);
+            executionContext.Variables.Set(Constants.Variables.Build.RepoUri, selfRepo.Url?.AbsoluteUri);
+            executionContext.Variables.Set(Constants.Variables.Build.RepoGitSubmoduleCheckout, selfRepo.Properties.Get<bool>(RepositoryProperties.CheckoutNestedSubmodules).ToString());
+            executionContext.Variables.Set(Constants.Variables.Build.RepoClean, selfRepo.Properties.Get<bool>(EndpointData.Clean).ToString());
+
+            string _workDirectory = IOUtil.GetWorkPath(HostContext);
+            executionContext.Variables.Set(Constants.Variables.Agent.BuildDirectory, Path.Combine(_workDirectory, trackingConfig.JobDirectory));
+            executionContext.Variables.Set(Constants.Variables.Build.SourcesDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.RepositoriesDirectory));
+            executionContext.Variables.Set(Constants.Variables.System.DefaultWorkingDirectory, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories["self"].SourceDirectory));
+            executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories["self"].SourceDirectory));
+            foreach (var repo in executionContext.Repositories)
             {
-                // triggered resource is a build
-                Pipelines.BuildResource triggeredBuild = executionContext.Builds.Single(x => string.Equals(x.Alias, triggerResourceName, StringComparison.OrdinalIgnoreCase));
-                executionContext.Debug($"Primary build: {triggeredBuild.Properties.Get<string>("name")}. build type: {triggeredBuild.Type}");
+                executionContext.Variables.Set($"{Constants.Variables.Build.SourcesDirectory}.{repo.Alias}", trackingConfig.Resources.Repositories[repo.Alias].SourceDirectory);
             }
         }
 

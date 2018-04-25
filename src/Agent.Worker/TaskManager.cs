@@ -51,7 +51,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
             foreach (var task in uniqueTasks.Select(x => x.Reference))
             {
-                if (agentPlugin.SupportedTasks.ContainsKey(task.Id))
+                if (agentPlugin.SupportedTasks.ContainsKey(task.Id) && agentPlugin.SupportedTasks[task.Id].ContainsKey(task.Version))
                 {
                     continue;
                 }
@@ -70,7 +70,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
             if (agentPlugin.SupportedTasks.ContainsKey(task.Reference.Id))
             {
-                return agentPlugin.SupportedTasks[task.Reference.Id];
+                return agentPlugin.SupportedTasks[task.Reference.Id][task.Reference.Version];
             }
 
             // Initialize the definition wrapper object.

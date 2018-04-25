@@ -314,7 +314,27 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 }
             }
 
-            // use jobextension solve inputValue, if solved result is rooted, return full path.
+            // use directoryManager resolve inputValue, if resolved result is rooted, return full path.
+            var directoryManager = HostContext.GetService<IDirectoryManager>();
+            fullPath = directoryManager.GetRootedPath(ExecutionContext, inputValue);
+            if (!string.IsNullOrEmpty(fullPath) &&
+                fullPath.IndexOfAny(Path.GetInvalidPathChars()) < 0 &&
+                Path.IsPathRooted(fullPath))
+            {
+                try
+                {
+                    fullPath = Path.GetFullPath(inputValue);
+                    Trace.Info($"DirectoryManager resolved a rooted path: {fullPath}");
+                    return fullPath;
+                }
+                catch (Exception ex)
+                {
+                    Trace.Error(ex);
+                    Trace.Info($"DirectoryManager resolved path is a rooted path, but it is not full qualified.");
+                }
+            }
+
+            // use jobextension resolve inputValue, if resolved result is rooted, return full path.
             var extensionManager = HostContext.GetService<IExtensionManager>();
             IJobExtension[] extensions =
                 (extensionManager.GetExtensions<IJobExtension>() ?? new List<IJobExtension>())
@@ -326,7 +346,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 if (!string.IsNullOrEmpty(fullPath))
                 {
                     // Stop on the first path root found.
-                    Trace.Info($"{extension.HostType.ToString()} JobExtension resolved a rooted path:: {fullPath}");
+                    Trace.Info($"{extension.HostType.ToString()} JobExtension resolved a rooted path: {fullPath}");
                     return fullPath;
                 }
             }
