@@ -1,6 +1,6 @@
 ﻿namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
-    public abstract class TrackingConfigBase
+    public abstract class LegacyTrackingConfigBase
     {
         protected static readonly string BuildSystem = "build";
 

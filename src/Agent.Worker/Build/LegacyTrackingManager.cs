@@ -12,20 +12,15 @@ using Microsoft.TeamFoundation.Build.WebApi;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
-    [ServiceLocator(Default = typeof(TrackingManager))]
-    public interface ITrackingManager : IAgentService
+    [ServiceLocator(Default = typeof(LegacyTrackingManager))]
+    public interface ILegacyTrackingManager : IAgentService
     {
-        TrackingConfig Create(
+        LegacyTrackingConfig Create(
             IExecutionContext executionContext,
             ServiceEndpoint endpoint,
             string hashKey,
             string file,
             bool overrideBuildDirectory);
-
-        TrackingConfig Create(
-            IExecutionContext executionContext,
-            string hashKey,
-            string file);
 
         TrackingConfigBase LoadIfExists(IExecutionContext executionContext, string file);
 
@@ -44,7 +39,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         void MaintenanceCompleted(TrackingConfig config, string file);
     }
 
-    public sealed class TrackingManager : AgentService, ITrackingManager
+    public sealed class LegacyTrackingManager : AgentService, ILegacyTrackingManager
     {
         public TrackingConfig Create(
             IExecutionContext executionContext,

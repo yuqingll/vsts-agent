@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 {
-    public sealed class LegacyTrackingConfig : TrackingConfigBase
+    public sealed class LegacyTrackingConfig : LegacyTrackingConfigBase
     {
         // The property name in the config file is misleading. The value really represents
         // the build folder - i.e. the folder that contains the source folder.
