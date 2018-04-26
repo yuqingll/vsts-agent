@@ -9,6 +9,7 @@ using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using Microsoft.VisualStudio.Services.Agent.Worker.Handlers;
 using Microsoft.VisualStudio.Services.Agent.Worker.Container;
+using Microsoft.VisualStudio.Services.Agent.Worker.Build;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker
 {
@@ -315,22 +316,32 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             // use directoryManager resolve inputValue, if resolved result is rooted, return full path.
-            var directoryManager = HostContext.GetService<IDirectoryManager>();
-            fullPath = directoryManager.GetRootedPath(ExecutionContext, inputValue);
-            if (!string.IsNullOrEmpty(fullPath) &&
-                fullPath.IndexOfAny(Path.GetInvalidPathChars()) < 0 &&
-                Path.IsPathRooted(fullPath))
+            IDirectoryManager directoryManager = null;
+            switch (ExecutionContext.Variables.System_HostType)
             {
-                try
+                case HostTypes.Build:
+                    directoryManager = HostContext.GetService<IBuildDirectoryManager>();
+                    break;
+            }
+
+            if (directoryManager != null)
+            {
+                fullPath = directoryManager.GetRootedPath(ExecutionContext, inputValue);
+                if (!string.IsNullOrEmpty(fullPath) &&
+                    fullPath.IndexOfAny(Path.GetInvalidPathChars()) < 0 &&
+                    Path.IsPathRooted(fullPath))
                 {
-                    fullPath = Path.GetFullPath(inputValue);
-                    Trace.Info($"DirectoryManager resolved a rooted path: {fullPath}");
-                    return fullPath;
-                }
-                catch (Exception ex)
-                {
-                    Trace.Error(ex);
-                    Trace.Info($"DirectoryManager resolved path is a rooted path, but it is not full qualified.");
+                    try
+                    {
+                        fullPath = Path.GetFullPath(inputValue);
+                        Trace.Info($"DirectoryManager resolved a rooted path: {fullPath}");
+                        return fullPath;
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.Error(ex);
+                        Trace.Info($"DirectoryManager resolved path is a rooted path, but it is not full qualified.");
+                    }
                 }
             }
 

@@ -256,7 +256,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             executionContext.Variables.Set(Constants.Variables.Build.RepoLocalPath, Path.Combine(_workDirectory, trackingConfig.Resources.Repositories["self"].SourceDirectory));
             foreach (var repo in executionContext.Repositories)
             {
-                executionContext.Variables.Set($"{Constants.Variables.Build.SourcesDirectory}.{repo.Alias}", trackingConfig.Resources.Repositories[repo.Alias].SourceDirectory);
+                executionContext.Variables.Set($"{Constants.Variables.Build.SourcesDirectory}.{repo.Alias}", Path.Combine(_workDirectory, trackingConfig.Resources.Repositories[repo.Alias].SourceDirectory));
             }
         }
 

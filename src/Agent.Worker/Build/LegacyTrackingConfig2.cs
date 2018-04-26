@@ -19,47 +19,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         {
         }
 
-        public LegacyTrackingConfig2(
-            IExecutionContext executionContext,
-            LegacyTrackingConfig copy,
-            string sourcesDirectoryNameOnly,
-            string repositoryType,
-            bool useNewArtifactsDirectoryName = false)
-        {
-            // Set the directories.
-            BuildDirectory = Path.GetFileName(copy.BuildDirectory); // Just take the portion after _work folder.
-            string artifactsDirectoryNameOnly =
-                useNewArtifactsDirectoryName ? Constants.Build.Path.ArtifactsDirectory : Constants.Build.Path.LegacyArtifactsDirectory;
-            ArtifactsDirectory = Path.Combine(BuildDirectory, artifactsDirectoryNameOnly);
-            SourcesDirectory = Path.Combine(BuildDirectory, sourcesDirectoryNameOnly);
-            TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
-
-            // Set the other properties.
-            CollectionId = copy.CollectionId;
-            CollectionUrl = executionContext.Variables.System_TFCollectionUrl;
-            DefinitionId = copy.DefinitionId;
-            HashKey = copy.HashKey;
-            RepositoryUrl = copy.RepositoryUrl;
-            System = copy.System;
-        }
-
-        public LegacyTrackingConfig2(IExecutionContext executionContext, ServiceEndpoint endpoint, int buildDirectory, string hashKey)
-        {
-            // Set the directories.
-            BuildDirectory = buildDirectory.ToString(CultureInfo.InvariantCulture);
-            ArtifactsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.ArtifactsDirectory);
-            SourcesDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.SourcesDirectory);
-            TestResultsDirectory = Path.Combine(BuildDirectory, Constants.Build.Path.TestResultsDirectory);
-
-            // Set the other properties.
-            CollectionId = executionContext.Variables.System_CollectionId;
-            DefinitionId = executionContext.Variables.System_DefinitionId;
-            HashKey = hashKey;
-            RepositoryUrl = endpoint.Url.AbsoluteUri;
-            System = BuildSystem;
-            UpdateJobRunProperties(executionContext);
-        }
-
         // Convert 1.x Legacy tracking file
         public LegacyTrackingConfig2(
             IExecutionContext executionContext,
@@ -98,19 +57,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         {
             get
             {
-                return 4;
+                return 3;
             }
 
             set
             {
-                // Version 4 changes:
-                //   Multi-type resources tracking support was added.
                 // Version 3 changes:
                 //   CollectionName was removed.
                 //   CollectionUrl was added.
                 switch (value)
                 {
-                    case 4:
                     case 3:
                     case 2:
                         break;
@@ -200,15 +156,5 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
         [JsonProperty("common_testresultsdirectory")]
         public string TestResultsDirectory { get; set; }
-
-        [JsonProperty("build_resources")]
-        public ResourceTrackingConfig Resources { get; set; }
-
-        public void UpdateJobRunProperties(IExecutionContext executionContext)
-        {
-            CollectionUrl = executionContext.Variables.System_TFCollectionUrl;
-            DefinitionName = executionContext.Variables.Build_DefinitionName;
-            LastRunOn = DateTimeOffset.Now;
-        }
     }
 }

@@ -126,18 +126,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
         {
             if (cleanRepository)
             {
-                // A clean build has been requested, if the $(build.Clean) variable didn't force 
-                // the BuildDirectoryManager to re-create the source directory earlier,
-                // let's do it now explicitly.
-
-                IBuildDirectoryManager buildDirectoryManager = HostContext.GetService<IBuildDirectoryManager>();
-                BuildCleanOption? cleanOption = _context.Variables.Build_Clean;
-
-                buildDirectoryManager.CreateDirectory(
-                _context,
-                description: "source directory",
-                path: rootPath,
-                deleteExisting: !(cleanOption == BuildCleanOption.All || cleanOption == BuildCleanOption.Source));
+                // A clean build has been requested
+                // let's re-create the source directory
+                IOUtil.DeleteDirectory(rootPath, _context.CancellationToken);
+                Directory.CreateDirectory(rootPath);
             }
 
             Dictionary<string, Uri> oldMappings = await GetOldMappings(rootPath);

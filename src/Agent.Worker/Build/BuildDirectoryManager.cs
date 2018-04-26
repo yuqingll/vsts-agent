@@ -20,7 +20,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
     {
     }
 
-    public sealed class BuildDirectoryManager : DirectoryManager
+    public sealed class BuildDirectoryManager : DirectoryManager, IBuildDirectoryManager
     {
         public override TrackingConfig ConvertLegacyTrackingConfig(IExecutionContext executionContext)
         {
@@ -40,7 +40,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             if (existingLegacyConfig != null)
             {
                 // Convert legacy format to the new format if required. (1.x agent -> 2.x agent)
-                LegacyTrackingConfig2 legacyConfig = ConvertToNewFormat(executionContext, existingConfig);
+                LegacyTrackingConfig2 legacyConfig = ConvertToNewFormat(executionContext, existingLegacyConfig);
 
                 // Convert to new format that support multi-repositories
                 var trackingConfig = new TrackingConfig();
@@ -170,163 +170,5 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
                 useNewArtifactsDirectoryName: true);
             return newConfig;
         }
-
-        private TrackingConfig ConvertToNewFormat(
-            IExecutionContext executionContext,
-            ServiceEndpoint endpoint,
-            TrackingConfigBase config)
-        {
-            Trace.Entering();
-
-            // If it's already in the new format, return it.
-            TrackingConfig newConfig = config as TrackingConfig;
-            if (newConfig != null)
-            {
-                return newConfig;
-            }
-
-            // Delete the legacy artifact/staging directories.
-            LegacyTrackingConfig legacyConfig = config as LegacyTrackingConfig;
-            DeleteDirectory(
-                executionContext,
-                description: "legacy artifacts directory",
-                path: Path.Combine(legacyConfig.BuildDirectory, Constants.Build.Path.LegacyArtifactsDirectory));
-            DeleteDirectory(
-                executionContext,
-                description: "legacy staging directory",
-                path: Path.Combine(legacyConfig.BuildDirectory, Constants.Build.Path.LegacyStagingDirectory));
-
-            // Determine the source directory name. Check if the directory is named "s" already.
-            // Convert the source directory to be named "s" if there is a problem with the old name.
-            string sourcesDirectoryNameOnly = Constants.Build.Path.SourcesDirectory;
-            if (!Directory.Exists(Path.Combine(legacyConfig.BuildDirectory, sourcesDirectoryNameOnly))
-                && !String.Equals(endpoint.Name, Constants.Build.Path.ArtifactsDirectory, StringComparison.OrdinalIgnoreCase)
-                && !String.Equals(endpoint.Name, Constants.Build.Path.LegacyArtifactsDirectory, StringComparison.OrdinalIgnoreCase)
-                && !String.Equals(endpoint.Name, Constants.Build.Path.LegacyStagingDirectory, StringComparison.OrdinalIgnoreCase)
-                && !String.Equals(endpoint.Name, Constants.Build.Path.TestResultsDirectory, StringComparison.OrdinalIgnoreCase)
-                && !endpoint.Name.Contains("\\")
-                && !endpoint.Name.Contains("/")
-                && Directory.Exists(Path.Combine(legacyConfig.BuildDirectory, endpoint.Name)))
-            {
-                sourcesDirectoryNameOnly = endpoint.Name;
-            }
-
-            // Convert to the new format.
-            newConfig = new TrackingConfig(
-                executionContext,
-                legacyConfig,
-                sourcesDirectoryNameOnly,
-                endpoint.Type,
-                // The legacy artifacts directory has been deleted at this point - see above - so
-                // switch the configuration to using the new naming scheme.
-                useNewArtifactsDirectoryName: true);
-            return newConfig;
-        }
-
-        public void CreateDirectory(IExecutionContext executionContext, string description, string path, bool deleteExisting)
-        {
-            // Delete.
-            if (deleteExisting)
-            {
-                executionContext.Debug($"Delete existing {description}: '{path}'");
-                DeleteDirectory(executionContext, description, path);
-            }
-
-            // Create.
-            if (!Directory.Exists(path))
-            {
-                executionContext.Debug($"Creating {description}: '{path}'");
-                Trace.Info($"Creating {description}.");
-                Directory.CreateDirectory(path);
-            }
-        }
-
-        private void DeleteDirectory(IExecutionContext executionContext, string description, string path)
-        {
-            Trace.Info($"Checking if {description} exists: '{path}'");
-            if (Directory.Exists(path))
-            {
-                executionContext.Debug($"Deleting {description}: '{path}'");
-                IOUtil.DeleteDirectory(path, executionContext.CancellationToken);
-            }
-        }
-
-        // Prefer variable over endpoint data when get build directory clean option.
-        // Prefer agent.clean.builddirectory over build.clean when use variable
-        // available value for build.clean or agent.clean.builddirectory:
-        //      Delete entire build directory if build.clean=all is set.
-        //      Recreate binaries dir if clean=binary is set.
-        //      Recreate source dir if clean=src is set.
-        private BuildCleanOption GetBuildDirectoryCleanOption(IExecutionContext executionContext, Pipelines.RepositoryResource repository)
-        {
-            bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
-            if (clean)
-            {
-                string cleanOptionData = repository.Properties.Get<string>(EndpointData.CleanOptions);
-                RepositoryCleanOptions? cleanOptionFromEndpoint = EnumUtil.TryParse<RepositoryCleanOptions>(cleanOptionData);
-                if (cleanOptionFromEndpoint != null)
-                {
-                    if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceDir)
-                    {
-                        return BuildCleanOption.Source;
-                    }
-                }
-            }
-
-            return BuildCleanOption.None;
-        }
-
-        // Prefer variable over endpoint data when get build directory clean option.
-        // Prefer agent.clean.builddirectory over build.clean when use variable
-        // available value for build.clean or agent.clean.builddirectory:
-        //      Delete entire build directory if build.clean=all is set.
-        //      Recreate binaries dir if clean=binary is set.
-        //      Recreate source dir if clean=src is set.
-        private BuildCleanOption GetBuildDirectoryCleanOption(IExecutionContext executionContext, ServiceEndpoint endpoint)
-        {
-            BuildCleanOption? cleanOption = executionContext.Variables.Build_Clean;
-            if (cleanOption != null)
-            {
-                return cleanOption.Value;
-            }
-
-            bool clean = false;
-            if (endpoint.Data.ContainsKey(EndpointData.Clean))
-            {
-                clean = StringUtil.ConvertToBoolean(endpoint.Data[EndpointData.Clean]);
-            }
-
-            if (clean && endpoint.Data.ContainsKey("cleanOptions"))
-            {
-                RepositoryCleanOptions? cleanOptionFromEndpoint = EnumUtil.TryParse<RepositoryCleanOptions>(endpoint.Data["cleanOptions"]);
-                if (cleanOptionFromEndpoint != null)
-                {
-                    if (cleanOptionFromEndpoint == RepositoryCleanOptions.AllBuildDir)
-                    {
-                        return BuildCleanOption.All;
-                    }
-                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceDir)
-                    {
-                        return BuildCleanOption.Source;
-                    }
-                    else if (cleanOptionFromEndpoint == RepositoryCleanOptions.SourceAndOutput)
-                    {
-                        return BuildCleanOption.Binary;
-                    }
-                }
-            }
-
-            return BuildCleanOption.None;
-        }
-    }
-
-
-    // TODO: use enum defined in build2.webapi when it's available.
-    public enum RepositoryCleanOptions
-    {
-        Source,
-        SourceAndOutput,
-        SourceDir,
-        AllBuildDir,
     }
 }
