@@ -150,6 +150,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     string resourceAlias = inputPath.Substring(lastIndex + 1);
                     if (!string.IsNullOrEmpty(resourceAlias))
                     {
+                        Trace.Verbose($"Prepand resource directory for resource: {resourceAlias}");
                         var repo = executionContext.Repositories.SingleOrDefault(x => string.Equals(x.Alias, resourceAlias, StringComparison.OrdinalIgnoreCase));
                         return Path.Combine(repo.Properties.Get<string>("sourcedirectory"), inputPath.Substring(0, lastIndex));
                     }

@@ -333,7 +333,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 {
                     try
                     {
-                        fullPath = Path.GetFullPath(inputValue);
+                        fullPath = Path.GetFullPath(fullPath);
                         Trace.Info($"DirectoryManager resolved a rooted path: {fullPath}");
                         return fullPath;
                     }
