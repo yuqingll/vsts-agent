@@ -49,8 +49,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 return false;
             }
 
-            IWorkerCommandExtension extension;
-            if (_commandExtensions.TryGetValue(command.Area, out extension))
+            var agentPlugins = HostContext.GetService<IAgentPluginManager>();
+            if (agentPlugins.SupportedLoggingCommands.ContainsKey(command.Area) &&
+                agentPlugins.SupportedLoggingCommands[command.Area].ContainsKey(command.Event))
+            {
+                agentPlugins.ProcessCommand(context, command);
+            }
+            else if (_commandExtensions.TryGetValue(command.Area, out IWorkerCommandExtension extension))
             {
                 if (!extension.SupportedHostTypes.HasFlag(context.Variables.System_HostType))
                 {

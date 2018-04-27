@@ -254,6 +254,7 @@ namespace Microsoft.VisualStudio.Services.Agent
                 public static readonly string Diagnostic = "agent.diagnostic";
                 public static readonly string HomeDirectory = "agent.homedirectory";
                 public static readonly string Id = "agent.id";
+                public static readonly string GitUseSChannel = "agent.gituseschannel";
                 public static readonly string JobName = "agent.jobname";
                 public static readonly string JobStatus = "agent.jobstatus";
                 public static readonly string MachineName = "agent.machinename";
