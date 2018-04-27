@@ -1,15 +1,11 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.TeamFoundation.Build.WebApi;
-using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Microsoft.VisualStudio.Services.Agent.PluginCore;
-using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
 namespace Agent.DropPlugin
 {
@@ -19,52 +15,8 @@ namespace Agent.DropPlugin
 
         public string Event => "upload";
 
-        internal static class ArtifactUploadEventProperties
-        {
-            public static readonly string ContainerFolder = "containerfolder";
-            public static readonly string ArtifactName = "artifactname";
-            public static readonly string ArtifactType = "artifacttype";
-            public static readonly string Browsable = "Browsable";
-        }
-
-        private Dictionary<string, string> ExtractArtifactProperties(Dictionary<string, string> eventProperties)
-        {
-            return eventProperties.Where(pair => !(string.Compare(pair.Key, ArtifactUploadEventProperties.ContainerFolder, StringComparison.OrdinalIgnoreCase) == 0 ||
-                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactName, StringComparison.OrdinalIgnoreCase) == 0 ||
-                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactType, StringComparison.OrdinalIgnoreCase) == 0)).ToDictionary(pair => pair.Key, pair => pair.Value);
-        }
-        private Boolean IsUncSharePath(AgentCommandPluginExecutionContext context, string path)
-        {
-            if (string.IsNullOrEmpty(path))
-            {
-                return false;
-            }
-
-            Uri uri;
-            // Add try catch to avoid unexpected throw from Uri.Property.
-            try
-            {
-                if (Uri.TryCreate(path, UriKind.RelativeOrAbsolute, out uri))
-                {
-                    if (uri.IsAbsoluteUri && uri.IsUnc)
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                context.Debug($"Can't determine path: {path} is UNC or not.");
-                context.Debug(ex.ToString());
-                return false;
-            }
-
-            return false;
-        }
-
         public async Task ProcessCommandAsync(AgentCommandPluginExecutionContext context, CancellationToken token)
         {
-            context.Output("Upload Drop!!!");
             context.Debug(context.Properties.Count.ToString());
             context.Debug(context.Data);
 
@@ -142,9 +94,54 @@ namespace Agent.DropPlugin
             string fileContainerFullPath = PluginUtil.Format($"#/{containerId}/{containerFolder}");
             context.Output(PluginUtil.Loc("UploadToFileContainer", fullPath, fileContainerFullPath));
 
-            BuildServer buildHelper = new BuildServer(context.VssConnection, projectId);
-            var artifact = await buildHelper.AssociateArtifact(buildId, artifactName, ArtifactResourceTypes.Container, fileContainerFullPath, propertyDictionary, token);
+            BuildServer buildHelper = new BuildServer(context.VssConnection);
+            var artifact = await buildHelper.AssociateArtifact(projectId, buildId, artifactName, ArtifactResourceTypes.Container, fileContainerFullPath, propertyDictionary, token);
             context.Output(PluginUtil.Loc("AssociateArtifactWithBuild", artifact.Id, buildId));
+        }
+
+
+        private static class ArtifactUploadEventProperties
+        {
+            public static readonly string ContainerFolder = "containerfolder";
+            public static readonly string ArtifactName = "artifactname";
+            public static readonly string ArtifactType = "artifacttype";
+            public static readonly string Browsable = "Browsable";
+        }
+
+        private Dictionary<string, string> ExtractArtifactProperties(Dictionary<string, string> eventProperties)
+        {
+            return eventProperties.Where(pair => !(string.Compare(pair.Key, ArtifactUploadEventProperties.ContainerFolder, StringComparison.OrdinalIgnoreCase) == 0 ||
+                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactName, StringComparison.OrdinalIgnoreCase) == 0 ||
+                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactType, StringComparison.OrdinalIgnoreCase) == 0)).ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
+
+        private Boolean IsUncSharePath(AgentCommandPluginExecutionContext context, string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            Uri uri;
+            // Add try catch to avoid unexpected throw from Uri.Property.
+            try
+            {
+                if (Uri.TryCreate(path, UriKind.RelativeOrAbsolute, out uri))
+                {
+                    if (uri.IsAbsoluteUri && uri.IsUnc)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                context.Debug($"Can't determine path: {path} is UNC or not.");
+                context.Debug(ex.ToString());
+                return false;
+            }
+
+            return false;
         }
     }
 }
