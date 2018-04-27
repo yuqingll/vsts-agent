@@ -16,7 +16,6 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
         public static int Main(string[] args)
         {
             Console.CancelKeyPress += Console_CancelKeyPress;
-            AssemblyLoadContext.Default.Resolving += ResolveAssembly;
 
             try
             {
@@ -30,17 +29,17 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
                     PluginUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
 
                     string serializedContext = Console.ReadLine();
+                    PluginUtil.NotNullOrEmpty(serializedContext, nameof(serializedContext));
+
                     AgentTaskPluginExecutionContext executionContext = PluginUtil.ConvertFromJson<AgentTaskPluginExecutionContext>(serializedContext);
+                    PluginUtil.NotNull(executionContext, nameof(executionContext));
 
-                    executionContext.Debug(assemblyQualifiedName);
-                    executionContext.Debug(serializedContext);
-
-                    Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
-                    var taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
-                    PluginUtil.NotNull(taskPlugin, nameof(taskPlugin));
-
+                    AssemblyLoadContext.Default.Resolving += ResolveAssembly;
                     try
                     {
+                        Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
+                        var taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
+                        PluginUtil.NotNull(taskPlugin, nameof(taskPlugin));
                         taskPlugin.RunAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
                     }
                     catch (Exception ex)
@@ -51,7 +50,6 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
                     finally
                     {
                         AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
-                        Console.CancelKeyPress -= Console_CancelKeyPress;
                     }
 
                     return 0;
@@ -62,42 +60,44 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
                     PluginUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
 
                     string serializedContext = Console.ReadLine();
+                    PluginUtil.NotNullOrEmpty(serializedContext, nameof(serializedContext));
+
                     AgentCommandPluginExecutionContext executionContext = PluginUtil.ConvertFromJson<AgentCommandPluginExecutionContext>(serializedContext);
+                    PluginUtil.NotNull(executionContext, nameof(executionContext));
 
-                    executionContext.Debug(assemblyQualifiedName);
-                    executionContext.Debug(serializedContext);
-
-                    Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
-                    var commandPlugin = Activator.CreateInstance(type) as IAgentCommandPlugin;
-                    PluginUtil.NotNull(commandPlugin, nameof(commandPlugin));
-
+                    AssemblyLoadContext.Default.Resolving += ResolveAssembly;
                     try
                     {
+                        Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
+                        var commandPlugin = Activator.CreateInstance(type) as IAgentCommandPlugin;
+                        PluginUtil.NotNull(commandPlugin, nameof(commandPlugin));
                         commandPlugin.ProcessCommandAsync(executionContext, tokenSource.Token).GetAwaiter().GetResult();
                     }
                     catch (Exception ex)
                     {
-                        // any exception throw from plugin will fail the task.
+                        // any exception throw from plugin will fail the command.
                         executionContext.Fail(ex.ToString());
                     }
                     finally
                     {
                         AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
-                        Console.CancelKeyPress -= Console_CancelKeyPress;
                     }
 
                     return 0;
                 }
                 else
                 {
-                    // infrastructure failure.
-                    Console.Error.WriteLine(new ArgumentOutOfRangeException(pluginType).ToString());
-                    return 1;
+                    throw new ArgumentOutOfRangeException(pluginType);
                 }
+            }
+            catch (Exception ex)
+            {
+                // infrastructure failure.
+                Console.Error.WriteLine(ex.ToString());
+                return 1;
             }
             finally
             {
-                AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
                 Console.CancelKeyPress -= Console_CancelKeyPress;
             }
         }

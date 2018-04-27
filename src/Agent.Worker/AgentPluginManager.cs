@@ -5,6 +5,7 @@ using Microsoft.VisualStudio.Services.WebApi;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
@@ -177,8 +178,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 Inputs = inputs,
                 Stage = stage,
                 Repositories = context.Repositories,
-                Endpoints = context.Endpoints,
-                PrependPath = context.PrependPath
+                Endpoints = context.Endpoints
             };
             // variables
             foreach (var publicVar in context.Variables.Public)
@@ -210,7 +210,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
                                                   fileName: file,
                                                   arguments: arguments,
-                                                  environment: null,
+                                                  environment: GetTaskPluginEnvironment(context),
                                                   requireExitCodeZero: true,
                                                   outputEncoding: null,
                                                   killProcessOnCancel: false,
@@ -308,6 +308,27 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 throw new NotSupportedException(command.ToString());
             }
+        }
+
+        private Dictionary<string, string> GetTaskPluginEnvironment(IExecutionContext context)
+        {
+            ArgUtil.NotNull(context, nameof(context));
+            if (context.PrependPath.Count == 0)
+            {
+                return null;
+            }
+
+            // Prepend path.
+            string prepend = string.Join(Path.PathSeparator.ToString(), context.PrependPath.Reverse<string>());
+            string originalPath = context.Variables.Get(Constants.PathVariable) ?? // Prefer a job variable.
+                System.Environment.GetEnvironmentVariable(Constants.PathVariable) ?? // Then an environment variable.
+                string.Empty;
+            string newPath = VarUtil.PrependPath(prepend, originalPath);
+
+            Dictionary<string, string> env = new Dictionary<string, string>(VarUtil.EnvironmentVariableKeyComparer);
+            env[Constants.PathVariable] = newPath;
+
+            return env;
         }
     }
 

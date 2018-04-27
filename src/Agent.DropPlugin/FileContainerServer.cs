@@ -55,10 +55,7 @@ namespace Agent.DropPlugin
             String source,
             CancellationToken cancellationToken)
         {
-            //set maxConcurrentUploads up to 2 until figure out how to use WinHttpHandler.MaxConnectionsPerServer modify DefaultConnectionLimit
             int maxConcurrentUploads = Math.Min(Environment.ProcessorCount, 2);
-            //context.Output($"Max Concurrent Uploads {maxConcurrentUploads}");
-
             List<String> files;
             if (File.Exists(source))
             {

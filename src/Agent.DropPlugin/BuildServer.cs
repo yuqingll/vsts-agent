@@ -4,22 +4,22 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Build2 = Microsoft.TeamFoundation.Build.WebApi;
+using Microsoft.TeamFoundation.Build.WebApi;
 using Microsoft.VisualStudio.Services.WebApi;
 
 namespace Agent.DropPlugin
 {
     public class BuildServer
     {
-        private readonly Build2.BuildHttpClient _buildHttpClient;
+        private readonly BuildHttpClient _buildHttpClient;
 
         public BuildServer(VssConnection connection)
         {
             PluginUtil.NotNull(connection, nameof(connection));
-            _buildHttpClient = connection.GetClient<Build2.BuildHttpClient>();
+            _buildHttpClient = connection.GetClient<BuildHttpClient>();
         }
 
-        public async Task<Build2.BuildArtifact> AssociateArtifact(
+        public async Task<BuildArtifact> AssociateArtifact(
             Guid projectId,
             int buildId,
             string name,
@@ -28,10 +28,10 @@ namespace Agent.DropPlugin
             Dictionary<string, string> propertiesDictionary,
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            Build2.BuildArtifact artifact = new Build2.BuildArtifact()
+            BuildArtifact artifact = new BuildArtifact()
             {
                 Name = name,
-                Resource = new Build2.ArtifactResource()
+                Resource = new ArtifactResource()
                 {
                     Data = data,
                     Type = type,

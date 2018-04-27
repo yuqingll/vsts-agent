@@ -17,11 +17,7 @@ namespace Agent.DropPlugin
 
         public async Task ProcessCommandAsync(AgentCommandPluginExecutionContext context, CancellationToken token)
         {
-            context.Debug(context.Properties.Count.ToString());
-            context.Debug(context.Data);
-
             PluginUtil.NotNull(context, nameof(context));
-            PluginUtil.NotNull(context.Endpoints, nameof(context.Endpoints));
 
             Guid projectId = new Guid(context.Variables.GetValueOrDefault(BuildVariables.TeamProjectId)?.Value ?? Guid.Empty.ToString());
             PluginUtil.NotEmpty(projectId, nameof(projectId));
@@ -55,11 +51,11 @@ namespace Agent.DropPlugin
             var propertyDictionary = ExtractArtifactProperties(context.Properties);
 
             string localPath = context.Data;
-            // if (context.Container != null)
-            // {
-            //     // Translate file path back from container path
-            //     localPath = context.Container.TranslateToHostPath(localPath);
-            // }
+            if (context.ContainerPathMappings.Count > 0)
+            {
+                // Translate file path back from container path
+                localPath = context.TranslateContainerPathToHostPath(localPath);
+            }
 
             if (string.IsNullOrEmpty(localPath))
             {
@@ -85,15 +81,14 @@ namespace Agent.DropPlugin
                 return;
             }
 
-            // queue async command task to associate artifact.
-            context.Debug($"Upload artifact: {fullPath} to server for build: {buildId} at backend.");
+            // Upload to file container
             context.Output(PluginUtil.Loc("UploadArtifact"));
-
             FileContainerServer fileContainerHelper = new FileContainerServer(context.VssConnection, projectId, containerId, containerFolder);
             await fileContainerHelper.CopyToContainerAsync(context, fullPath, token);
             string fileContainerFullPath = PluginUtil.Format($"#/{containerId}/{containerFolder}");
             context.Output(PluginUtil.Loc("UploadToFileContainer", fullPath, fileContainerFullPath));
 
+            // Associate build artifact
             BuildServer buildHelper = new BuildServer(context.VssConnection);
             var artifact = await buildHelper.AssociateArtifact(projectId, buildId, artifactName, ArtifactResourceTypes.Container, fileContainerFullPath, propertyDictionary, token);
             context.Output(PluginUtil.Loc("AssociateArtifactWithBuild", artifact.Id, buildId));
