@@ -69,9 +69,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
                 }
 
-                Util.ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
-                Util.ArgUtil.NotNull(taskPlugin.Id, nameof(taskPlugin.Id));
-                Util.ArgUtil.NotNullOrEmpty(taskPlugin.Version, nameof(taskPlugin.Version));
+                ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
+                ArgUtil.NotNull(taskPlugin.Id, nameof(taskPlugin.Id));
+                ArgUtil.NotNullOrEmpty(taskPlugin.Version, nameof(taskPlugin.Version));
                 if (!_supportedTasks.ContainsKey(taskPlugin.Id))
                 {
                     _supportedTasks[taskPlugin.Id] = new Dictionary<string, Definition>(StringComparer.OrdinalIgnoreCase);
@@ -140,9 +140,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     AssemblyLoadContext.Default.Resolving -= ResolveAssembly;
                 }
 
-                Util.ArgUtil.NotNull(commandPlugin, nameof(commandPlugin));
-                Util.ArgUtil.NotNullOrEmpty(commandPlugin.Area, nameof(commandPlugin.Area));
-                Util.ArgUtil.NotNullOrEmpty(commandPlugin.Event, nameof(commandPlugin.Event));
+                ArgUtil.NotNull(commandPlugin, nameof(commandPlugin));
+                ArgUtil.NotNullOrEmpty(commandPlugin.Area, nameof(commandPlugin.Area));
+                ArgUtil.NotNullOrEmpty(commandPlugin.Event, nameof(commandPlugin.Event));
 
                 if (!_supportedLoggingCommands.ContainsKey(commandPlugin.Area))
                 {
@@ -160,11 +160,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
         public async Task RunPluginTaskAsync(IExecutionContext context, string plugin, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler)
         {
-            Util.ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
+            ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
 
             // Resolve the working directory.
             string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
-            Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
+            ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
 
             // Agent.PluginHost
             string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
@@ -234,11 +234,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             if (_supportedLoggingCommands.ContainsKey(command.Area) && _supportedLoggingCommands[command.Area].ContainsKey(command.Event))
             {
                 var plugin = _supportedLoggingCommands[command.Area][command.Event];
-                Util.ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
+                ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
 
                 // Resolve the working directory.
                 string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
-                Util.ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
+                ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
 
                 // Agent.PluginHost
                 string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");

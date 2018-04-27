@@ -28,12 +28,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
         {
             // Validate args.
             Trace.Entering();
-            Util.ArgUtil.NotNull(Data, nameof(Data));
-            Util.ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
-            Util.ArgUtil.NotNull(Inputs, nameof(Inputs));
+            ArgUtil.NotNull(Data, nameof(Data));
+            ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
+            ArgUtil.NotNull(Inputs, nameof(Inputs));
+            ArgUtil.NotNullOrEmpty(Data.Target, nameof(Data.Target));
 
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
-            Util.ArgUtil.NotNullOrEmpty(Data.Target, nameof(Data.Target));
             await agentPlugin.RunPluginTaskAsync(ExecutionContext, Data.Target, Inputs, Data.Stage, OnDataReceived);
         }
 
