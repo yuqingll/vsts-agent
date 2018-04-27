@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -14,15 +15,136 @@ namespace Agent.DropPlugin
 {
     public class ArtifactUploadCommand : IAgentCommandPlugin
     {
-        public Task ProcessCommandAsync(AgentCommandPluginExecutionContext executionContext, CancellationToken token)
+        public string Area => "artifact";
+
+        public string Event => "upload";
+
+        internal static class ArtifactUploadEventProperties
         {
-            executionContext.Output("Upload Drop!!!");
-            executionContext.Debug(executionContext.Properties.Count.ToString());
-            executionContext.Debug(executionContext.Data);
+            public static readonly string ContainerFolder = "containerfolder";
+            public static readonly string ArtifactName = "artifactname";
+            public static readonly string ArtifactType = "artifacttype";
+            public static readonly string Browsable = "Browsable";
+        }
 
-            //executionContext.Fail(new InvalidOperationException("SomethingHappened!").ToString());
+        private Dictionary<string, string> ExtractArtifactProperties(Dictionary<string, string> eventProperties)
+        {
+            return eventProperties.Where(pair => !(string.Compare(pair.Key, ArtifactUploadEventProperties.ContainerFolder, StringComparison.OrdinalIgnoreCase) == 0 ||
+                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactName, StringComparison.OrdinalIgnoreCase) == 0 ||
+                                                  string.Compare(pair.Key, ArtifactUploadEventProperties.ArtifactType, StringComparison.OrdinalIgnoreCase) == 0)).ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
+        private Boolean IsUncSharePath(AgentCommandPluginExecutionContext context, string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
 
-            return Task.CompletedTask;
+            Uri uri;
+            // Add try catch to avoid unexpected throw from Uri.Property.
+            try
+            {
+                if (Uri.TryCreate(path, UriKind.RelativeOrAbsolute, out uri))
+                {
+                    if (uri.IsAbsoluteUri && uri.IsUnc)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                context.Debug($"Can't determine path: {path} is UNC or not.");
+                context.Debug(ex.ToString());
+                return false;
+            }
+
+            return false;
+        }
+
+        public async Task ProcessCommandAsync(AgentCommandPluginExecutionContext context, CancellationToken token)
+        {
+            context.Output("Upload Drop!!!");
+            context.Debug(context.Properties.Count.ToString());
+            context.Debug(context.Data);
+
+            PluginUtil.NotNull(context, nameof(context));
+            PluginUtil.NotNull(context.Endpoints, nameof(context.Endpoints));
+
+            Guid projectId = new Guid(context.Variables.GetValueOrDefault(BuildVariables.TeamProjectId)?.Value ?? Guid.Empty.ToString());
+            PluginUtil.NotEmpty(projectId, nameof(projectId));
+
+            string buildIdStr = context.Variables.GetValueOrDefault(BuildVariables.BuildId)?.Value ?? string.Empty;
+            if (!int.TryParse(buildIdStr, out int buildId))
+            {
+                throw new ArgumentOutOfRangeException(buildIdStr);
+            }
+
+            string containerIdStr = context.Variables.GetValueOrDefault(BuildVariables.ContainerId)?.Value ?? string.Empty;
+            if (!long.TryParse(containerIdStr, out long containerId))
+            {
+                throw new ArgumentOutOfRangeException(buildIdStr);
+            }
+
+            string artifactName;
+            if (!context.Properties.TryGetValue(ArtifactUploadEventProperties.ArtifactName, out artifactName) ||
+                string.IsNullOrEmpty(artifactName))
+            {
+                throw new Exception(PluginUtil.Loc("ArtifactNameRequired"));
+            }
+
+            string containerFolder;
+            if (!context.Properties.TryGetValue(ArtifactUploadEventProperties.ContainerFolder, out containerFolder) ||
+                string.IsNullOrEmpty(containerFolder))
+            {
+                containerFolder = artifactName;
+            }
+
+            var propertyDictionary = ExtractArtifactProperties(context.Properties);
+
+            string localPath = context.Data;
+            // if (context.Container != null)
+            // {
+            //     // Translate file path back from container path
+            //     localPath = context.Container.TranslateToHostPath(localPath);
+            // }
+
+            if (string.IsNullOrEmpty(localPath))
+            {
+                throw new Exception(PluginUtil.Loc("ArtifactLocationRequired"));
+            }
+
+            string hostType = context.Variables.GetValueOrDefault("system.hosttype")?.Value;
+            if (!IsUncSharePath(context, localPath) && !string.Equals(hostType, "Build", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception(PluginUtil.Loc("UploadArtifactCommandNotSupported", hostType ?? string.Empty));
+            }
+
+            string fullPath = Path.GetFullPath(localPath);
+            if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+            {
+                // if localPath is not a file or folder on disk
+                throw new FileNotFoundException(PluginUtil.Loc("PathNotExist", localPath));
+            }
+            else if (Directory.Exists(fullPath) && Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories).FirstOrDefault() == null)
+            {
+                // if localPath is a folder but the folder contains nothing
+                context.Warning(PluginUtil.Loc("DirectoryIsEmptyForArtifact", fullPath, artifactName));
+                return;
+            }
+
+            // queue async command task to associate artifact.
+            context.Debug($"Upload artifact: {fullPath} to server for build: {buildId} at backend.");
+            context.Output(PluginUtil.Loc("UploadArtifact"));
+
+            FileContainerServer fileContainerHelper = new FileContainerServer(context.VssConnection, projectId, containerId, containerFolder);
+            await fileContainerHelper.CopyToContainerAsync(context, fullPath, token);
+            string fileContainerFullPath = PluginUtil.Format($"#/{containerId}/{containerFolder}");
+            context.Output(PluginUtil.Loc("UploadToFileContainer", fullPath, fileContainerFullPath));
+
+            BuildServer buildHelper = new BuildServer(context.VssConnection, projectId);
+            var artifact = await buildHelper.AssociateArtifact(buildId, artifactName, ArtifactResourceTypes.Container, fileContainerFullPath, propertyDictionary, token);
+            context.Output(PluginUtil.Loc("AssociateArtifactWithBuild", artifact.Id, buildId));
         }
     }
 }

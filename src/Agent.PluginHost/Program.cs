@@ -20,24 +20,24 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
 
             try
             {
-                ArgUtil.NotNull(args, nameof(args));
-                ArgUtil.Equal(2, args.Length, nameof(args.Length));
+                PluginUtil.NotNull(args, nameof(args));
+                PluginUtil.Equal(2, args.Length, nameof(args.Length));
 
                 string pluginType = args[0];
                 if (string.Equals("task", pluginType, StringComparison.OrdinalIgnoreCase))
                 {
                     string assemblyQualifiedName = args[1];
-                    ArgUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
+                    PluginUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
 
                     string serializedContext = Console.ReadLine();
-                    AgentTaskPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentTaskPluginExecutionContext>(serializedContext);
+                    AgentTaskPluginExecutionContext executionContext = PluginUtil.ConvertFromJson<AgentTaskPluginExecutionContext>(serializedContext);
 
                     executionContext.Debug(assemblyQualifiedName);
                     executionContext.Debug(serializedContext);
 
                     Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
                     var taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
-                    ArgUtil.NotNull(taskPlugin, nameof(taskPlugin));
+                    PluginUtil.NotNull(taskPlugin, nameof(taskPlugin));
 
                     try
                     {
@@ -59,17 +59,17 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginHost
                 else if (string.Equals("command", pluginType, StringComparison.OrdinalIgnoreCase))
                 {
                     string assemblyQualifiedName = args[1];
-                    ArgUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
+                    PluginUtil.NotNullOrEmpty(assemblyQualifiedName, nameof(assemblyQualifiedName));
 
                     string serializedContext = Console.ReadLine();
-                    AgentCommandPluginExecutionContext executionContext = StringUtil.ConvertFromJson<AgentCommandPluginExecutionContext>(serializedContext);
+                    AgentCommandPluginExecutionContext executionContext = PluginUtil.ConvertFromJson<AgentCommandPluginExecutionContext>(serializedContext);
 
                     executionContext.Debug(assemblyQualifiedName);
                     executionContext.Debug(serializedContext);
 
                     Type type = Type.GetType(assemblyQualifiedName, throwOnError: true);
                     var commandPlugin = Activator.CreateInstance(type) as IAgentCommandPlugin;
-                    ArgUtil.NotNull(commandPlugin, nameof(commandPlugin));
+                    PluginUtil.NotNull(commandPlugin, nameof(commandPlugin));
 
                     try
                     {

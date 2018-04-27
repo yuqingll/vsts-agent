@@ -50,7 +50,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
 
             var agentPlugins = HostContext.GetService<IAgentPluginManager>();
-            if (agentPlugins.SupportedLoggingCommands.ContainsKey(command.Area) && agentPlugins.SupportedLoggingCommands[command.Area].Contains(command.Event))
+            if (agentPlugins.SupportedLoggingCommands.ContainsKey(command.Area) && agentPlugins.SupportedLoggingCommands[command.Area].ContainsKey(command.Event))
             {
                 agentPlugins.ProcessCommand(context, command);
             }

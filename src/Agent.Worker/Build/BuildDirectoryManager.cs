@@ -22,6 +22,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
 
     public sealed class BuildDirectoryManager : DirectoryManager, IBuildDirectoryManager
     {
+        public override string MaintenanceDescription => StringUtil.Loc("ConvertLegacyTrackingConfig");
+
         public override TrackingConfig ConvertLegacyTrackingConfig(IExecutionContext executionContext)
         {
             // Convert build single repository tracking file into the system tracking file that support tracking multiple resources.
@@ -118,6 +120,88 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
             executionContext.Variables.Set(Constants.Variables.Build.ArtifactStagingDirectory, artifactDir);
             executionContext.Variables.Set(Constants.Variables.Common.TestResultsDirectory, testResultDir);
             executionContext.Variables.Set(Constants.Variables.Build.BinariesDirectory, binaryDir);
+        }
+
+        public override Task RunMaintenanceOperation(IExecutionContext executionContext)
+        {
+            Trace.Entering();
+            ArgUtil.NotNull(executionContext, nameof(executionContext));
+
+            var legacyTrackingManager = HostContext.GetService<ILegacyTrackingManager>();
+            int staleBuildDirThreshold = executionContext.Variables.GetInt("maintenance.deleteworkingdirectory.daysthreshold") ?? 0;
+            if (staleBuildDirThreshold > 0)
+            {
+                // scan and delete unused build directories
+                executionContext.Output(StringUtil.Loc("DiscoverBuildDir", staleBuildDirThreshold));
+
+                Trace.Info("Scan all SourceFolder tracking files.");
+                string searchRoot = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), Constants.Build.Path.SourceRootMappingDirectory);
+                if (!Directory.Exists(searchRoot))
+                {
+                    executionContext.Output(StringUtil.Loc("GCDirNotExist", searchRoot));
+                    return Task.CompletedTask;
+                }
+
+                var allTrackingFiles = Directory.EnumerateFiles(searchRoot, Constants.Build.Path.TrackingConfigFile, SearchOption.AllDirectories);
+                Trace.Verbose($"Find {allTrackingFiles.Count()} tracking files.");
+
+                executionContext.Output(StringUtil.Loc("DirExpireLimit", staleBuildDirThreshold));
+                executionContext.Output(StringUtil.Loc("CurrentUTC", DateTime.UtcNow.ToString("o")));
+
+                // scan all sourcefolder tracking file, find which folder has never been used since UTC-expiration
+                // the scan and garbage discovery should be best effort.
+                // if the tracking file is in old format, just delete the folder since the first time the folder been use we will convert the tracking file to new format.
+                foreach (var trackingFile in allTrackingFiles)
+                {
+                    try
+                    {
+                        executionContext.Output(StringUtil.Loc("EvaluateTrackingFile", trackingFile));
+                        LegacyTrackingConfigBase tracking = legacyTrackingManager.LoadIfExists(executionContext, trackingFile);
+
+                        // detect whether the tracking file is in new format.
+                        LegacyTrackingConfig2 newTracking = tracking as LegacyTrackingConfig2;
+                        if (newTracking == null)
+                        {
+                            LegacyTrackingConfig legacyConfig = tracking as LegacyTrackingConfig;
+                            ArgUtil.NotNull(legacyConfig, nameof(LegacyTrackingConfig));
+
+                            Trace.Verbose($"{trackingFile} is a old format tracking file.");
+                            string fullPath = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), legacyConfig.BuildDirectory);
+                            executionContext.Output(StringUtil.Loc("Deleting", fullPath));
+                            IOUtil.DeleteDirectory(fullPath, executionContext.CancellationToken);
+                            IOUtil.DeleteFile(trackingFile);
+                        }
+                        else
+                        {
+                            Trace.Verbose($"{trackingFile} is a new format tracking file.");
+                            ArgUtil.NotNull(newTracking.LastRunOn, nameof(newTracking.LastRunOn));
+                            executionContext.Output(StringUtil.Loc("BuildDirLastUseTIme", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), newTracking.BuildDirectory), newTracking.LastRunOnString));
+                            if (DateTime.UtcNow - TimeSpan.FromDays(staleBuildDirThreshold) > newTracking.LastRunOn)
+                            {
+                                executionContext.Output(StringUtil.Loc("GCUnusedTrackingFile", trackingFile, staleBuildDirThreshold));
+                                string fullPath = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), newTracking.BuildDirectory);
+                                executionContext.Output(StringUtil.Loc("Deleting", fullPath));
+                                IOUtil.DeleteDirectory(fullPath, executionContext.CancellationToken);
+
+                                executionContext.Output(StringUtil.Loc("DeleteGCTrackingFile", fullPath));
+                                IOUtil.DeleteFile(trackingFile);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        executionContext.Error(StringUtil.Loc("ErrorDuringBuildGC", trackingFile));
+                        executionContext.Error(ex);
+                    }
+                }
+
+                return Task.CompletedTask;
+            }
+            else
+            {
+                executionContext.Output(StringUtil.Loc("GCBuildDirNotEnabled"));
+                return Task.CompletedTask;
+            }
         }
 
         private LegacyTrackingConfig2 ConvertToNewFormat(

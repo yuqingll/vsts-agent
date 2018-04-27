@@ -38,14 +38,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
             Util.ArgUtil.NotNull(Inputs, nameof(Inputs));
 
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
-            string target = Data.Target;
-            Util.ArgUtil.NotNullOrEmpty(target, nameof(target));
-            if (!agentPlugin.SupportedTasks.ContainsKey(new Guid(target)))
-            {
-                throw new NotSupportedException(target);
-            }
-
-            await agentPlugin.RunPluginTaskAsync(ExecutionContext, new Guid(target), Inputs, Data.Stage, OnDataReceived);
+            Util.ArgUtil.NotNullOrEmpty(Data.Target, nameof(Data.Target));
+            await agentPlugin.RunPluginTaskAsync(ExecutionContext, Data.Target, Inputs, Data.Stage, OnDataReceived);
         }
 
         private void OnDataReceived(object sender, ProcessDataReceivedEventArgs e)

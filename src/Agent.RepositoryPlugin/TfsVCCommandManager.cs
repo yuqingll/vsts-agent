@@ -33,7 +33,7 @@ namespace Agent.RepositoryPlugin
             get
             {
                 string version = Repository.Version;
-                ArgUtil.NotNullOrEmpty(version, nameof(version));
+                PluginUtil.NotNullOrEmpty(version, nameof(version));
                 return version;
             }
         }
@@ -43,7 +43,7 @@ namespace Agent.RepositoryPlugin
             get
             {
                 string sourcesDirectory = Repository.Properties.Get<string>("sourcedirectory");
-                ArgUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
+                PluginUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
                 return sourcesDirectory;
             }
         }
@@ -55,7 +55,7 @@ namespace Agent.RepositoryPlugin
             get
             {
                 string workspace = ExecutionContext.Variables.GetValueOrDefault("build.repository.tfvc.workspace")?.Value;
-                ArgUtil.NotNullOrEmpty(workspace, nameof(workspace));
+                PluginUtil.NotNullOrEmpty(workspace, nameof(workspace));
                 return workspace;
             }
         }
@@ -68,8 +68,8 @@ namespace Agent.RepositoryPlugin
         protected async Task RunCommandAsync(FormatFlags formatFlags, params string[] args)
         {
             // Validation.
-            ArgUtil.NotNull(args, nameof(args));
-            ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
+            PluginUtil.NotNull(args, nameof(args));
+            PluginUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
 
             // Invoke tf.
             var processInvoker = new ProcessInvoker(ExecutionContext);
@@ -110,7 +110,7 @@ namespace Agent.RepositoryPlugin
         {
             // Run the command.
             TfsVCPorcelainCommandResult result = await TryRunPorcelainCommandAsync(formatFlags, args);
-            ArgUtil.NotNull(result, nameof(result));
+            PluginUtil.NotNull(result, nameof(result));
             if (result.Exception != null)
             {
                 // The command failed. Dump the output and throw.
@@ -126,8 +126,8 @@ namespace Agent.RepositoryPlugin
         protected async Task<TfsVCPorcelainCommandResult> TryRunPorcelainCommandAsync(FormatFlags formatFlags, params string[] args)
         {
             // Validation.
-            ArgUtil.NotNull(args, nameof(args));
-            ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
+            PluginUtil.NotNull(args, nameof(args));
+            PluginUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
 
             // Invoke tf.
             var processInvoker = new ProcessInvoker(ExecutionContext);
@@ -175,14 +175,14 @@ namespace Agent.RepositoryPlugin
         private string FormatArguments(FormatFlags formatFlags, params string[] args)
         {
             // Validation.
-            ArgUtil.NotNull(args, nameof(args));
-            ArgUtil.NotNull(Endpoint, nameof(Endpoint));
-            ArgUtil.NotNull(Endpoint.Authorization, nameof(Endpoint.Authorization));
-            ArgUtil.NotNull(Endpoint.Authorization.Parameters, nameof(Endpoint.Authorization.Parameters));
-            ArgUtil.Equal(EndpointAuthorizationSchemes.OAuth, Endpoint.Authorization.Scheme, nameof(Endpoint.Authorization.Scheme));
+            PluginUtil.NotNull(args, nameof(args));
+            PluginUtil.NotNull(Endpoint, nameof(Endpoint));
+            PluginUtil.NotNull(Endpoint.Authorization, nameof(Endpoint.Authorization));
+            PluginUtil.NotNull(Endpoint.Authorization.Parameters, nameof(Endpoint.Authorization.Parameters));
+            PluginUtil.Equal(EndpointAuthorizationSchemes.OAuth, Endpoint.Authorization.Scheme, nameof(Endpoint.Authorization.Scheme));
             string accessToken = Endpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.AccessToken, out accessToken) ? accessToken : null;
-            ArgUtil.NotNullOrEmpty(accessToken, EndpointAuthorizationParameters.AccessToken);
-            ArgUtil.NotNull(Endpoint.Url, nameof(Endpoint.Url));
+            PluginUtil.NotNullOrEmpty(accessToken, EndpointAuthorizationParameters.AccessToken);
+            PluginUtil.NotNull(Endpoint.Url, nameof(Endpoint.Url));
 
             // Format each arg.
             var formattedArgs = new List<string>();

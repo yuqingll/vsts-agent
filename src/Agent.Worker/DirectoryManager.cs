@@ -25,6 +25,7 @@ using Microsoft.VisualStudio.Services.Agent.Worker.Maintenance;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker
 {
+    [ServiceLocator(Default = typeof(DirectoryManager))]
     public interface IDirectoryManager : IAgentService
     {
         TrackingConfig PrepareDirectory(IExecutionContext executionContext);
@@ -32,13 +33,20 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         string GetRootedPath(IExecutionContext executionContext, string inputPath);
     }
 
-    public abstract class DirectoryManager : AgentService, IMaintenanceServiceProvider
+    public class DirectoryManager : AgentService, IDirectoryManager, IMaintenanceServiceProvider
     {
-        public string MaintenanceDescription => StringUtil.Loc("DeleteUnusedBuildDir");
+        public virtual string MaintenanceDescription => StringUtil.Loc("DeleteUnusedJobDir");
         public Type ExtensionType => typeof(IMaintenanceServiceProvider);
 
-        public abstract TrackingConfig ConvertLegacyTrackingConfig(IExecutionContext executionContext);
-        public abstract void PrepareDirectory(IExecutionContext executionContext, TrackingConfig trackingConfig);
+        public virtual TrackingConfig ConvertLegacyTrackingConfig(IExecutionContext executionContext)
+        {
+            throw new InvalidOperationException(nameof(ConvertLegacyTrackingConfig));
+        }
+
+        public virtual void PrepareDirectory(IExecutionContext executionContext, TrackingConfig trackingConfig)
+        {
+            throw new InvalidOperationException(nameof(PrepareDirectory));
+        }
 
         public TrackingConfig PrepareDirectory(IExecutionContext executionContext)
         {
@@ -63,7 +71,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 executionContext.Variables.System_DefinitionId,
                 Constants.Agent.Path.TrackingConfigFile);
             Trace.Verbose($"Loading tracking config if exists: {trackingFile}");
-            TrackingConfig trackingConfig = trackingManager.LoadIfExists(executionContext, trackingFile);
+            TrackingConfig trackingConfig = trackingManager.LoadIfExists(trackingFile);
 
             // the tracking config doesn't exists, this may indicate the job folder tracking is done in Build/Release, try convert them to new format
             if (trackingConfig == null)
@@ -152,7 +160,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     {
                         Trace.Verbose($"Prepand resource directory for resource: {resourceAlias}");
                         var repo = executionContext.Repositories.SingleOrDefault(x => string.Equals(x.Alias, resourceAlias, StringComparison.OrdinalIgnoreCase));
-                        return Path.Combine(repo.Properties.Get<string>("sourcedirectory"), inputPath.Substring(0, lastIndex));
+                        if (repo != null)
+                        {
+                            return Path.Combine(repo.Properties.Get<string>("sourcedirectory"), inputPath.Substring(0, lastIndex));
+                        }
                     }
                 }
             }
@@ -188,141 +199,140 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
-        public async Task RunMaintenanceOperation(IExecutionContext executionContext)
+        public virtual async Task RunMaintenanceOperation(IExecutionContext executionContext)
         {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));
 
             // this might be not accurate when the agent is configured for old TFS server
-            // int totalAvailableTimeInMinutes = executionContext.Variables.GetInt("maintenance.jobtimeoutinminutes") ?? 60;
+            int totalAvailableTimeInMinutes = executionContext.Variables.GetInt("maintenance.jobtimeoutinminutes") ?? 60;
 
-            // // start a timer to track how much time we used
-            // Stopwatch totalTimeSpent = Stopwatch.StartNew();
+            // start a timer to track how much time we used
+            Stopwatch totalTimeSpent = Stopwatch.StartNew();
 
-            // var trackingManager = HostContext.GetService<ITrackingManager>();
-            // int staleBuildDirThreshold = executionContext.Variables.GetInt("maintenance.deleteworkingdirectory.daysthreshold") ?? 0;
-            // if (staleBuildDirThreshold > 0)
-            // {
-            //     // scan unused build directories
-            //     executionContext.Output(StringUtil.Loc("DiscoverBuildDir", staleBuildDirThreshold));
-            //     trackingManager.MarkExpiredForGarbageCollection(executionContext, TimeSpan.FromDays(staleBuildDirThreshold));
-            // }
-            // else
-            // {
-            //     executionContext.Output(StringUtil.Loc("GCBuildDirNotEnabled"));
-            //     return;
-            // }
+            var trackingManager = HostContext.GetService<ITrackingManager>();
+            int staleJobDirThreshold = executionContext.Variables.GetInt("maintenance.deleteworkingdirectory.daysthreshold") ?? 0;
+            if (staleJobDirThreshold > 0)
+            {
+                // scan and delete unused job directories
+                executionContext.Output(StringUtil.Loc("GCJobDir", staleJobDirThreshold));
+                trackingManager.GarbageCollectStaleJobDirectory(executionContext, TimeSpan.FromDays(staleJobDirThreshold));
+            }
+            else
+            {
+                executionContext.Output(StringUtil.Loc("GCJobDirNotEnabled"));
+                return;
+            }
 
-            // executionContext.Output(StringUtil.Loc("GCBuildDir"));
+            // give source provider a chance to run maintenance operation on all repository resources
+            Trace.Info("Scan all JobFolder tracking files.");
+            string searchRoot = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), Constants.Build.Path.SourceRootMappingDirectory);
+            if (!Directory.Exists(searchRoot))
+            {
+                executionContext.Output(StringUtil.Loc("GCDirNotExist", searchRoot));
+                return;
+            }
 
-            // // delete unused build directories
-            // trackingManager.DisposeCollectedGarbage(executionContext);
+            // Dictionary<trackingFile, Dictionary<alias, repoConfig>>
+            Dictionary<string, Dictionary<string, RepositoryTrackingConfig>> repositoryTrackingConfigs = new Dictionary<string, Dictionary<string, RepositoryTrackingConfig>>(StringComparer.OrdinalIgnoreCase);
+            var allTrackingFiles = Directory.EnumerateFiles(searchRoot, Constants.Agent.Path.TrackingConfigFile, SearchOption.AllDirectories);
+            Trace.Verbose($"Find {allTrackingFiles.Count()} tracking files.");
+            foreach (var trackingFile in allTrackingFiles)
+            {
+                executionContext.Output(StringUtil.Loc("EvaluateTrackingFile", trackingFile));
+                TrackingConfig tracking = trackingManager.LoadIfExists(trackingFile);
 
-            // // give source provider a chance to run maintenance operation
-            // Trace.Info("Scan all SourceFolder tracking files.");
-            // string searchRoot = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), Constants.Build.Path.SourceRootMappingDirectory);
-            // if (!Directory.Exists(searchRoot))
-            // {
-            //     executionContext.Output(StringUtil.Loc("GCDirNotExist", searchRoot));
-            //     return;
-            // }
+                if (tracking != null)
+                {
+                    repositoryTrackingConfigs[trackingFile] = new Dictionary<string, RepositoryTrackingConfig>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var repo in tracking.Resources.Repositories)
+                    {
+                        repositoryTrackingConfigs[trackingFile][repo.Key] = repo.Value;
+                    }
+                }
+            }
 
-            // <tracking config, tracking file path>
-            // List<Tuple<TrackingConfig, string>> optimizeTrackingFiles = new List<Tuple<TrackingConfig, string>>();
-            // var allTrackingFiles = Directory.EnumerateFiles(searchRoot, Constants.Build.Path.TrackingConfigFile, SearchOption.AllDirectories);
-            // Trace.Verbose($"Find {allTrackingFiles.Count()} tracking files.");
-            // foreach (var trackingFile in allTrackingFiles)
-            // {
-            //     executionContext.Output(StringUtil.Loc("EvaluateTrackingFile", trackingFile));
-            //     TrackingConfig tracking = trackingManager.LoadIfExists(executionContext, trackingFile);
+            // build up a reverse lookup list, get repo.alias and tracking file from RepositoryTrackingConfig
+            List<Tuple<RepositoryTrackingConfig, string, string>> optimizeTrackingFiles = new List<Tuple<RepositoryTrackingConfig, string, string>>();
+            foreach (var tracking in repositoryTrackingConfigs)
+            {
+                foreach (var repoTracking in tracking.Value)
+                {
+                    optimizeTrackingFiles.Add(new Tuple<RepositoryTrackingConfig, string, string>(repoTracking.Value, repoTracking.Key, tracking.Key));
+                }
+            }
 
-            //     // detect whether the tracking file is in new format.
-            //     TrackingConfig newTracking = tracking as TrackingConfig;
-            //     if (newTracking == null)
-            //     {
-            //         executionContext.Output(StringUtil.Loc("GCOldFormatTrackingFile", trackingFile));
-            //     }
-            //     else if (string.IsNullOrEmpty(newTracking.RepositoryType))
-            //     {
-            //         // repository not been set.
-            //         executionContext.Output(StringUtil.Loc("SkipTrackingFileWithoutRepoType", trackingFile));
-            //     }
-            //     else
-            //     {
-            //         optimizeTrackingFiles.Add(new Tuple<TrackingConfig, string>(newTracking, trackingFile));
-            //     }
-            // }
+            // Sort the all tracking file ASC by last maintenance attempted time
+            foreach (var trackingInfo in optimizeTrackingFiles.OrderBy(x => x.Item1.LastMaintenanceAttemptedOn))
+            {
+                // maintenance has been cancelled.
+                executionContext.CancellationToken.ThrowIfCancellationRequested();
 
-            // // Sort the all tracking file ASC by last maintenance attempted time
-            // foreach (var trackingInfo in optimizeTrackingFiles.OrderBy(x => x.Item1.LastMaintenanceAttemptedOn))
-            // {
-            //     // maintenance has been cancelled.
-            //     executionContext.CancellationToken.ThrowIfCancellationRequested();
+                bool runMainenance = false;
+                RepositoryTrackingConfig repoTrackingConfig = trackingInfo.Item1;
+                string repoAlias = trackingInfo.Item2;
+                string trackingFile = trackingInfo.Item3;
+                if (repoTrackingConfig.LastMaintenanceAttemptedOn == null)
+                {
+                    // this folder never run maintenance before, we will do maintenance if there is more than half of the time remains.
+                    if (totalTimeSpent.Elapsed.TotalMinutes < totalAvailableTimeInMinutes / 2)  // 50% time left
+                    {
+                        runMainenance = true;
+                    }
+                    else
+                    {
+                        executionContext.Output($"Working directory '{repoTrackingConfig.SourceDirectory}' has never run maintenance before. Skip since we may not have enough time.");
+                    }
+                }
+                else if (repoTrackingConfig.LastMaintenanceCompletedOn == null)
+                {
+                    // this folder did finish maintenance last time, this might indicate we need more time for this working directory
+                    if (totalTimeSpent.Elapsed.TotalMinutes < totalAvailableTimeInMinutes / 4)  // 75% time left
+                    {
+                        runMainenance = true;
+                    }
+                    else
+                    {
+                        executionContext.Output($"Working directory '{repoTrackingConfig.SourceDirectory}' didn't finish maintenance last time. Skip since we may not have enough time.");
+                    }
+                }
+                else
+                {
+                    // estimate time for running maintenance
+                    TimeSpan estimateTime = repoTrackingConfig.LastMaintenanceCompletedOn.Value - repoTrackingConfig.LastMaintenanceAttemptedOn.Value;
 
-            //     bool runMainenance = false;
-            //     TrackingConfig trackingConfig = trackingInfo.Item1;
-            //     string trackingFile = trackingInfo.Item2;
-            //     if (trackingConfig.LastMaintenanceAttemptedOn == null)
-            //     {
-            //         // this folder never run maintenance before, we will do maintenance if there is more than half of the time remains.
-            //         if (totalTimeSpent.Elapsed.TotalMinutes < totalAvailableTimeInMinutes / 2)  // 50% time left
-            //         {
-            //             runMainenance = true;
-            //         }
-            //         else
-            //         {
-            //             executionContext.Output($"Working directory '{trackingConfig.BuildDirectory}' has never run maintenance before. Skip since we may not have enough time.");
-            //         }
-            //     }
-            //     else if (trackingConfig.LastMaintenanceCompletedOn == null)
-            //     {
-            //         // this folder did finish maintenance last time, this might indicate we need more time for this working directory
-            //         if (totalTimeSpent.Elapsed.TotalMinutes < totalAvailableTimeInMinutes / 4)  // 75% time left
-            //         {
-            //             runMainenance = true;
-            //         }
-            //         else
-            //         {
-            //             executionContext.Output($"Working directory '{trackingConfig.BuildDirectory}' didn't finish maintenance last time. Skip since we may not have enough time.");
-            //         }
-            //     }
-            //     else
-            //     {
-            //         // estimate time for running maintenance
-            //         TimeSpan estimateTime = trackingConfig.LastMaintenanceCompletedOn.Value - trackingConfig.LastMaintenanceAttemptedOn.Value;
+                    // there is more than 10 mins left after we run maintenance on this repository directory
+                    if (totalAvailableTimeInMinutes > totalTimeSpent.Elapsed.TotalMinutes + estimateTime.TotalMinutes + 10)
+                    {
+                        runMainenance = true;
+                    }
+                    else
+                    {
+                        executionContext.Output($"Working directory '{repoTrackingConfig.SourceDirectory}' may take about '{estimateTime.TotalMinutes}' mins to finish maintenance. It's too risky since we only have '{totalAvailableTimeInMinutes - totalTimeSpent.Elapsed.TotalMinutes}' mins left for maintenance.");
+                    }
+                }
 
-            //         // there is more than 10 mins left after we run maintenance on this repository directory
-            //         if (totalAvailableTimeInMinutes > totalTimeSpent.Elapsed.TotalMinutes + estimateTime.TotalMinutes + 10)
-            //         {
-            //             runMainenance = true;
-            //         }
-            //         else
-            //         {
-            //             executionContext.Output($"Working directory '{trackingConfig.BuildDirectory}' may take about '{estimateTime.TotalMinutes}' mins to finish maintenance. It's too risky since we only have '{totalAvailableTimeInMinutes - totalTimeSpent.Elapsed.TotalMinutes}' mins left for maintenance.");
-            //         }
-            //     }
-
-            //     if (runMainenance)
-            //     {
-            //         var extensionManager = HostContext.GetService<IExtensionManager>();
-            //         ISourceProvider sourceProvider = extensionManager.GetExtensions<ISourceProvider>().FirstOrDefault(x => string.Equals(x.RepositoryType, trackingConfig.RepositoryType, StringComparison.OrdinalIgnoreCase));
-            //         if (sourceProvider != null)
-            //         {
-            //             try
-            //             {
-            //                 trackingManager.MaintenanceStarted(trackingConfig, trackingFile);
-            //                 string repositoryPath = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), trackingConfig.SourcesDirectory);
-            //                 await sourceProvider.RunMaintenanceOperations(executionContext, repositoryPath);
-            //                 trackingManager.MaintenanceCompleted(trackingConfig, trackingFile);
-            //             }
-            //             catch (Exception ex)
-            //             {
-            //                 executionContext.Error(StringUtil.Loc("ErrorDuringBuildGC", trackingFile));
-            //                 executionContext.Error(ex);
-            //             }
-            //         }
-            //     }
-            // }
+                if (runMainenance)
+                {
+                    var extensionManager = HostContext.GetService<IExtensionManager>();
+                    ISourceProvider sourceProvider = extensionManager.GetExtensions<ISourceProvider>().FirstOrDefault(x => string.Equals(x.RepositoryType, repoTrackingConfig.RepositoryType, StringComparison.OrdinalIgnoreCase));
+                    if (sourceProvider != null)
+                    {
+                        try
+                        {
+                            trackingManager.RepositoryMaintenanceStarted(trackingFile, repoAlias);
+                            string repositoryPath = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), repoTrackingConfig.SourceDirectory);
+                            await sourceProvider.RunMaintenanceOperations(executionContext, repositoryPath);
+                            trackingManager.RepositoryMaintenanceCompleted(trackingFile, repoAlias);
+                        }
+                        catch (Exception ex)
+                        {
+                            executionContext.Error(StringUtil.Loc("ErrorDuringBuildGC", trackingFile));
+                            executionContext.Error(ex);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -331,19 +341,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     {
         TrackingConfig Create(IExecutionContext executionContext, string file);
 
-        TrackingConfig LoadIfExists(IExecutionContext executionContext, string file);
+        TrackingConfig LoadIfExists(string file);
 
         //void MarkForGarbageCollection(IExecutionContext executionContext, TrackingConfigBase config);
 
         void Update(IExecutionContext executionContext, TrackingConfig config, string file);
 
-        // void MarkExpiredForGarbageCollection(IExecutionContext executionContext, TimeSpan expiration);
+        void GarbageCollectStaleJobDirectory(IExecutionContext executionContext, TimeSpan expiration);
 
         // void DisposeCollectedGarbage(IExecutionContext executionContext);
 
-        // void MaintenanceStarted(TrackingConfig config, string file);
+        void RepositoryMaintenanceStarted(string file, string repoAlias);
 
-        // void MaintenanceCompleted(TrackingConfig config, string file);
+        void RepositoryMaintenanceCompleted(string file, string repoAlias);
     }
 
     public sealed class TrackingManager : AgentService, ITrackingManager
@@ -550,7 +560,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             WriteToFile(file, config);
         }
 
-        public TrackingConfig LoadIfExists(IExecutionContext executionContext, string file)
+        public TrackingConfig LoadIfExists(string file)
         {
             Trace.Entering();
 
@@ -566,192 +576,147 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
-        //         public void MarkForGarbageCollection(IExecutionContext executionContext, TrackingConfigBase config)
-        //         {
-        //             Trace.Entering();
+        // public void MarkForGarbageCollection(IExecutionContext executionContext, TrackingConfig config)
+        // {
+        //     Trace.Entering();
 
-        //             // Convert legacy format to the new format.
-        //             LegacyTrackingConfig legacyConfig = config as LegacyTrackingConfig;
-        //             if (legacyConfig != null)
-        //             {
-        //                 // Convert legacy format to the new format.
-        //                 config = new TrackingConfig(
-        //                     executionContext,
-        //                     legacyConfig,
-        //                     // The repository type and sources folder wasn't stored in the legacy format - only the
-        //                     // build folder was stored. Since the hash key has changed, it is
-        //                     // unknown what the source folder was named. Just set the folder name
-        //                     // to "s" so the property isn't left blank. 
-        //                     repositoryType: string.Empty,
-        //                     sourcesDirectoryNameOnly: Constants.Build.Path.SourcesDirectory);
-        //             }
+        //     // Convert legacy format to the new format.
+        //     LegacyTrackingConfig legacyConfig = config as LegacyTrackingConfig;
+        //     if (legacyConfig != null)
+        //     {
+        //         // Convert legacy format to the new format.
+        //         config = new TrackingConfig(
+        //             executionContext,
+        //             legacyConfig,
+        //             // The repository type and sources folder wasn't stored in the legacy format - only the
+        //             // build folder was stored. Since the hash key has changed, it is
+        //             // unknown what the source folder was named. Just set the folder name
+        //             // to "s" so the property isn't left blank. 
+        //             repositoryType: string.Empty,
+        //             sourcesDirectoryNameOnly: Constants.Build.Path.SourcesDirectory);
+        //     }
 
-        //             // Write a copy of the tracking config to the GC folder.
-        //             string gcDirectory = Path.Combine(
-        //                 IOUtil.GetWorkPath(HostContext),
-        //                 Constants.Build.Path.SourceRootMappingDirectory,
-        //                 Constants.Build.Path.GarbageCollectionDirectory);
-        //             string file = Path.Combine(
-        //                 gcDirectory,
-        //                 StringUtil.Format("{0}.json", Guid.NewGuid()));
-        //             WriteToFile(file, config);
-        //         }
+        //     // Write a copy of the tracking config to the GC folder.
+        //     string gcDirectory = Path.Combine(
+        //         IOUtil.GetWorkPath(HostContext),
+        //         Constants.Build.Path.SourceRootMappingDirectory,
+        //         Constants.Build.Path.GarbageCollectionDirectory);
+        //     string file = Path.Combine(
+        //         gcDirectory,
+        //         StringUtil.Format("{0}.json", Guid.NewGuid()));
+        //     WriteToFile(file, config);
+        // }
 
-        //         public void MaintenanceStarted(TrackingConfig config, string file)
-        //         {
-        //             Trace.Entering();
-        //             config.LastMaintenanceAttemptedOn = DateTimeOffset.Now;
-        //             config.LastMaintenanceCompletedOn = null;
-        //             WriteToFile(file, config);
-        //         }
+        public void RepositoryMaintenanceStarted(string file, string repoAlias)
+        {
+            Trace.Entering();
+            TrackingConfig trackingConfig = LoadIfExists(file);
+            ArgUtil.NotNull(trackingConfig, nameof(trackingConfig));
 
-        //         public void MaintenanceCompleted(TrackingConfig config, string file)
-        //         {
-        //             Trace.Entering();
-        //             config.LastMaintenanceCompletedOn = DateTimeOffset.Now;
-        //             WriteToFile(file, config);
-        //         }
+            trackingConfig.Resources.Repositories.TryGetValue(repoAlias, out RepositoryTrackingConfig repoTracking);
+            ArgUtil.NotNull(repoTracking, nameof(repoTracking));
+            repoTracking.LastMaintenanceAttemptedOn = DateTimeOffset.Now;
+            repoTracking.LastMaintenanceCompletedOn = null;
 
-        //         public void MarkExpiredForGarbageCollection(IExecutionContext executionContext, TimeSpan expiration)
-        //         {
-        //             Trace.Entering();
-        //             Trace.Info("Scan all SourceFolder tracking files.");
-        //             string searchRoot = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), Constants.Build.Path.SourceRootMappingDirectory);
-        //             if (!Directory.Exists(searchRoot))
-        //             {
-        //                 executionContext.Output(StringUtil.Loc("GCDirNotExist", searchRoot));
-        //                 return;
-        //             }
+            WriteToFile(file, trackingConfig);
+        }
 
-        //             var allTrackingFiles = Directory.EnumerateFiles(searchRoot, Constants.Build.Path.TrackingConfigFile, SearchOption.AllDirectories);
-        //             Trace.Verbose($"Find {allTrackingFiles.Count()} tracking files.");
+        public void RepositoryMaintenanceCompleted(string file, string repoAlias)
+        {
+            Trace.Entering();
+            TrackingConfig trackingConfig = LoadIfExists(file);
+            ArgUtil.NotNull(trackingConfig, nameof(trackingConfig));
 
-        //             executionContext.Output(StringUtil.Loc("DirExpireLimit", expiration.TotalDays));
-        //             executionContext.Output(StringUtil.Loc("CurrentUTC", DateTime.UtcNow.ToString("o")));
+            trackingConfig.Resources.Repositories.TryGetValue(repoAlias, out RepositoryTrackingConfig repoTracking);
+            ArgUtil.NotNull(repoTracking, nameof(repoTracking));
+            repoTracking.LastMaintenanceCompletedOn = DateTimeOffset.Now;
 
-        //             // scan all sourcefolder tracking file, find which folder has never been used since UTC-expiration
-        //             // the scan and garbage discovery should be best effort.
-        //             // if the tracking file is in old format, just delete the folder since the first time the folder been use we will convert the tracking file to new format.
-        //             foreach (var trackingFile in allTrackingFiles)
-        //             {
-        //                 try
-        //                 {
-        //                     executionContext.Output(StringUtil.Loc("EvaluateTrackingFile", trackingFile));
-        //                     TrackingConfigBase tracking = LoadIfExists(executionContext, trackingFile);
+            WriteToFile(file, trackingConfig);
+        }
 
-        //                     // detect whether the tracking file is in new format.
-        //                     TrackingConfig newTracking = tracking as TrackingConfig;
-        //                     if (newTracking == null)
-        //                     {
-        //                         LegacyTrackingConfig legacyConfig = tracking as LegacyTrackingConfig;
-        //                         ArgUtil.NotNull(legacyConfig, nameof(LegacyTrackingConfig));
+        public void GarbageCollectStaleJobDirectory(IExecutionContext executionContext, TimeSpan expiration)
+        {
+            Trace.Entering();
+            PrintOutDiskUsage(executionContext);
 
-        //                         Trace.Verbose($"{trackingFile} is a old format tracking file.");
+            Trace.Info("Scan all JobFolder tracking files.");
+            string searchRoot = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), Constants.Agent.Path.JobRootMappingDirectory);
+            if (!Directory.Exists(searchRoot))
+            {
+                executionContext.Output(StringUtil.Loc("GCDirNotExist", searchRoot));
+                return;
+            }
 
-        //                         executionContext.Output(StringUtil.Loc("GCOldFormatTrackingFile", trackingFile));
-        //                         MarkForGarbageCollection(executionContext, legacyConfig);
-        //                         IOUtil.DeleteFile(trackingFile);
-        //                     }
-        //                     else
-        //                     {
-        //                         Trace.Verbose($"{trackingFile} is a new format tracking file.");
-        //                         ArgUtil.NotNull(newTracking.LastRunOn, nameof(newTracking.LastRunOn));
-        //                         executionContext.Output(StringUtil.Loc("BuildDirLastUseTIme", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), newTracking.BuildDirectory), newTracking.LastRunOnString));
-        //                         if (DateTime.UtcNow - expiration > newTracking.LastRunOn)
-        //                         {
-        //                             executionContext.Output(StringUtil.Loc("GCUnusedTrackingFile", trackingFile, expiration.TotalDays));
-        //                             MarkForGarbageCollection(executionContext, newTracking);
-        //                             IOUtil.DeleteFile(trackingFile);
-        //                         }
-        //                     }
-        //                 }
-        //                 catch (Exception ex)
-        //                 {
-        //                     executionContext.Error(StringUtil.Loc("ErrorDuringBuildGC", trackingFile));
-        //                     executionContext.Error(ex);
-        //                 }
-        //             }
-        //         }
+            var allTrackingFiles = Directory.EnumerateFiles(searchRoot, Constants.Agent.Path.TrackingConfigFile, SearchOption.AllDirectories);
+            Trace.Verbose($"Find {allTrackingFiles.Count()} tracking files.");
 
-        //         public void DisposeCollectedGarbage(IExecutionContext executionContext)
-        //         {
-        //             Trace.Entering();
-        //             PrintOutDiskUsage(executionContext);
+            bool garbageCollected = false;
+            executionContext.Output(StringUtil.Loc("DirExpireLimit", expiration.TotalDays));
+            executionContext.Output(StringUtil.Loc("CurrentUTC", DateTime.UtcNow.ToString("o")));
 
-        //             string gcDirectory = Path.Combine(
-        //                 HostContext.GetDirectory(WellKnownDirectory.Work),
-        //                 Constants.Build.Path.SourceRootMappingDirectory,
-        //                 Constants.Build.Path.GarbageCollectionDirectory);
+            // scan all sourcefolder tracking file, find which folder has never been used since UTC-expiration
+            // the scan and garbage discovery should be best effort.
+            // if the tracking file is in old format, just delete the folder since the first time the folder been use we will convert the tracking file to new format.
+            foreach (var trackingFile in allTrackingFiles)
+            {
+                // maintenance has been cancelled.
+                executionContext.CancellationToken.ThrowIfCancellationRequested();
 
-        //             if (!Directory.Exists(gcDirectory))
-        //             {
-        //                 executionContext.Output(StringUtil.Loc("GCDirNotExist", gcDirectory));
-        //                 return;
-        //             }
+                try
+                {
+                    executionContext.Output(StringUtil.Loc("EvaluateTrackingFile", trackingFile));
+                    TrackingConfig tracking = LoadIfExists(trackingFile);
 
-        //             IEnumerable<string> gcTrackingFiles = Directory.EnumerateFiles(gcDirectory, "*.json");
-        //             if (gcTrackingFiles == null || gcTrackingFiles.Count() == 0)
-        //             {
-        //                 executionContext.Output(StringUtil.Loc("GCDirIsEmpty", gcDirectory));
-        //                 return;
-        //             }
+                    ArgUtil.NotNull(tracking.LastRunOn, nameof(tracking.LastRunOn));
+                    executionContext.Output(StringUtil.Loc("JobDirLastUseTime", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), tracking.JobDirectory), tracking.LastRunOnString));
+                    if (DateTime.UtcNow - expiration > tracking.LastRunOn)
+                    {
+                        garbageCollected = true;
+                        executionContext.Output(StringUtil.Loc("Deleting", Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), tracking.JobDirectory)));
+                        IOUtil.DeleteDirectory(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), tracking.JobDirectory), executionContext.CancellationToken);
 
-        //             Trace.Info($"Find {gcTrackingFiles.Count()} GC tracking files.");
+                        executionContext.Output(StringUtil.Loc("DeleteGCTrackingFile", trackingFile));
+                        IOUtil.DeleteFile(trackingFile);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    executionContext.Error(StringUtil.Loc("ErrorDuringJobDirGC", trackingFile));
+                    executionContext.Error(ex);
+                }
+            }
 
-        //             if (gcTrackingFiles.Count() > 0)
-        //             {
-        //                 foreach (string gcFile in gcTrackingFiles)
-        //                 {
-        //                     // maintenance has been cancelled.
-        //                     executionContext.CancellationToken.ThrowIfCancellationRequested();
+            // print out disk usage after garbage collect
+            if (garbageCollected)
+            {
+                PrintOutDiskUsage(executionContext);
+            }
+        }
 
-        //                     try
-        //                     {
-        //                         var gcConfig = LoadIfExists(executionContext, gcFile) as TrackingConfig;
-        //                         ArgUtil.NotNull(gcConfig, nameof(TrackingConfig));
-
-        //                         string fullPath = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Work), gcConfig.BuildDirectory);
-        //                         executionContext.Output(StringUtil.Loc("Deleting", fullPath));
-        //                         IOUtil.DeleteDirectory(fullPath, executionContext.CancellationToken);
-
-        //                         executionContext.Output(StringUtil.Loc("DeleteGCTrackingFile", fullPath));
-        //                         IOUtil.DeleteFile(gcFile);
-        //                     }
-        //                     catch (Exception ex)
-        //                     {
-        //                         executionContext.Error(StringUtil.Loc("ErrorDuringBuildGCDelete", gcFile));
-        //                         executionContext.Error(ex);
-        //                     }
-        //                 }
-
-        //                 PrintOutDiskUsage(executionContext);
-        //             }
-        //         }
-
-        //         private void PrintOutDiskUsage(IExecutionContext context)
-        //         {
-        //             // Print disk usage should be best effort, since DriveInfo can't detect usage of UNC share.
-        //             try
-        //             {
-        //                 context.Output($"Disk usage for working directory: {HostContext.GetDirectory(WellKnownDirectory.Work)}");
-        //                 var workDirectoryDrive = new DriveInfo(HostContext.GetDirectory(WellKnownDirectory.Work));
-        //                 long freeSpace = workDirectoryDrive.AvailableFreeSpace;
-        //                 long totalSpace = workDirectoryDrive.TotalSize;
-        // #if OS_WINDOWS
-        //                 context.Output($"Working directory belongs to drive: '{workDirectoryDrive.Name}'");
-        // #else
-        //                 context.Output($"Information about file system on which working directory resides.");
-        // #endif
-        //                 context.Output($"Total size: '{totalSpace / 1024.0 / 1024.0} MB'");
-        //                 context.Output($"Available space: '{freeSpace / 1024.0 / 1024.0} MB'");
-        //             }
-        //             catch (Exception ex)
-        //             {
-        //                 context.Warning($"Unable inspect disk usage for working directory {HostContext.GetDirectory(WellKnownDirectory.Work)}.");
-        //                 Trace.Error(ex);
-        //                 context.Debug(ex.ToString());
-        //             }
-        //         }
+        private void PrintOutDiskUsage(IExecutionContext context)
+        {
+            // Print disk usage should be best effort, since DriveInfo can't detect usage of UNC share.
+            try
+            {
+                context.Output($"Disk usage for working directory: {HostContext.GetDirectory(WellKnownDirectory.Work)}");
+                var workDirectoryDrive = new DriveInfo(HostContext.GetDirectory(WellKnownDirectory.Work));
+                long freeSpace = workDirectoryDrive.AvailableFreeSpace;
+                long totalSpace = workDirectoryDrive.TotalSize;
+#if OS_WINDOWS
+                context.Output($"Working directory belongs to drive: '{workDirectoryDrive.Name}'");
+#else
+                        context.Output($"Information about file system on which working directory resides.");
+#endif
+                context.Output($"Total size: '{totalSpace / 1024.0 / 1024.0} MB'");
+                context.Output($"Available space: '{freeSpace / 1024.0 / 1024.0} MB'");
+            }
+            catch (Exception ex)
+            {
+                context.Warning($"Unable inspect disk usage for working directory {HostContext.GetDirectory(WellKnownDirectory.Work)}.");
+                Trace.Error(ex);
+                context.Debug(ex.ToString());
+            }
+        }
 
         private void WriteToFile(string file, object value)
         {

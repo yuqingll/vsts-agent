@@ -32,7 +32,7 @@ namespace Agent.RepositoryPlugin
         {
 #if OS_WINDOWS
             // check git version for SChannel SSLBackend (Windows Only)
-            bool schannelSslBackend = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
+            bool schannelSslBackend = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
             if (schannelSslBackend)
             {
                 gitCommandManager.EnsureGitVersion(_minGitVersionSupportSSLBackendOverride, throwOnNotMatch: true);
@@ -65,7 +65,7 @@ namespace Agent.RepositoryPlugin
         {
 #if OS_WINDOWS
             // check git version for SChannel SSLBackend (Windows Only)
-            bool schannelSslBackend = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
+            bool schannelSslBackend = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
             if (schannelSslBackend)
             {
                 gitCommandManager.EnsureGitVersion(_minGitVersionSupportSSLBackendOverride, throwOnNotMatch: true);
@@ -104,7 +104,7 @@ namespace Agent.RepositoryPlugin
         // we have to use http.extraheader option to provide auth header for on-prem tfs git
         public override void RequirementCheck(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository, GitCommandManager gitCommandManager)
         {
-            var selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
+            var selfManageGitCreds = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
             if (selfManageGitCreds)
             {
                 // Customer choose to own git creds by themselves, we don't have to worry about git version anymore.
@@ -113,14 +113,14 @@ namespace Agent.RepositoryPlugin
 
             // Since that variable is added around TFS 2015 Qu2.
             // Old TFS AT will not send this variable to build agent, and VSTS will always send it to build agent.
-            bool onPremTfsGit = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.OnPremTfsGit), true);
+            bool onPremTfsGit = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.OnPremTfsGit), true);
 
             // ensure git version and git-lfs version for on-prem tfsgit.
             if (onPremTfsGit)
             {
                 gitCommandManager.EnsureGitVersion(_minGitVersionSupportAuthHeader, throwOnNotMatch: true);
 
-                bool gitLfsSupport = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.GitLfsSupport));
+                bool gitLfsSupport = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.GitLfsSupport));
                 if (gitLfsSupport)
                 {
                     gitCommandManager.EnsureGitLFSVersion(_minGitLfsVersionSupportAuthHeader, throwOnNotMatch: true);
@@ -129,7 +129,7 @@ namespace Agent.RepositoryPlugin
 
 #if OS_WINDOWS
             // check git version for SChannel SSLBackend (Windows Only)
-            bool schannelSslBackend = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
+            bool schannelSslBackend = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
             if (schannelSslBackend)
             {
                 gitCommandManager.EnsureGitVersion(_minGitVersionSupportSSLBackendOverride, throwOnNotMatch: true);
@@ -140,7 +140,7 @@ namespace Agent.RepositoryPlugin
         public override string GenerateAuthHeader(AgentTaskPluginExecutionContext executionContext, string username, string password)
         {
             // tfsgit use bearer auth header with JWToken from systemconnection.
-            ArgUtil.NotNullOrEmpty(password, nameof(password));
+            PluginUtil.NotNullOrEmpty(password, nameof(password));
             return $"bearer {password}";
         }
     }
@@ -176,8 +176,8 @@ namespace Agent.RepositoryPlugin
             CancellationToken cancellationToken)
         {
             // Validate args.
-            ArgUtil.NotNull(executionContext, nameof(executionContext));
-            ArgUtil.NotNull(repository, nameof(repository));
+            PluginUtil.NotNull(executionContext, nameof(executionContext));
+            PluginUtil.NotNull(repository, nameof(repository));
 
             Dictionary<string, string> configModifications = new Dictionary<string, string>();
             bool selfManageGitCreds = false;
@@ -200,10 +200,10 @@ namespace Agent.RepositoryPlugin
             string sourceBranch = repository.Properties.Get<string>("sourcebranch");
             string sourceVersion = repository.Version;
 
-            bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
-            bool checkoutSubmodules = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutSubmodules));
-            bool checkoutNestedSubmodules = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutNestedSubmodules));
-            bool acceptUntrustedCerts = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.AcceptUntrustedCertificates));
+            bool clean = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
+            bool checkoutSubmodules = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutSubmodules));
+            bool checkoutNestedSubmodules = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.CheckoutNestedSubmodules));
+            bool acceptUntrustedCerts = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.AcceptUntrustedCertificates));
 
             var agentCert = executionContext.GetCertConfiguration();
             acceptUntrustedCerts = acceptUntrustedCerts || (agentCert?.SkipServerCertificateValidation ?? false);
@@ -214,8 +214,8 @@ namespace Agent.RepositoryPlugin
                 fetchDepth = 0;
             }
 
-            bool gitLfsSupport = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.GitLfsSupport));
-            bool exposeCred = StringUtil.ConvertToBoolean(repository.Properties.Get<string>("preservecredential"));
+            bool gitLfsSupport = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.GitLfsSupport));
+            bool exposeCred = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>("preservecredential"));
 
             executionContext.Debug($"Repository url={repositoryUrl}");
             executionContext.Debug($"targetPath={targetPath}");
@@ -231,7 +231,7 @@ namespace Agent.RepositoryPlugin
 
             bool preferGitFromPath;
 #if OS_WINDOWS
-            bool schannelSslBackend = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
+            bool schannelSslBackend = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
             executionContext.Debug($"schannelSslBackend={schannelSslBackend}");
 
             // Determine which git will be use
@@ -240,7 +240,7 @@ namespace Agent.RepositoryPlugin
             var definitionSetting = executionContext.Variables.GetValueOrDefault("system.prefergitfrompath");
             if (definitionSetting != null)
             {
-                preferGitFromPath = StringUtil.ConvertToBoolean(definitionSetting.Value);
+                preferGitFromPath = PluginUtil.ConvertToBoolean(definitionSetting.Value);
             }
             else
             {
@@ -252,7 +252,7 @@ namespace Agent.RepositoryPlugin
 #endif
 
             // Determine do we need to provide creds to git operation
-            selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
+            selfManageGitCreds = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
             if (selfManageGitCreds)
             {
                 // Customer choose to own git creds by themselves.
@@ -311,11 +311,11 @@ namespace Agent.RepositoryPlugin
             }
 
             // prepare credentail embedded urls
-            repositoryUrlWithCred = UrlUtil.GetCredentialEmbeddedUrl(repositoryUrl, username, password);
+            repositoryUrlWithCred = PluginUtil.GetCredentialEmbeddedUrl(repositoryUrl, username, password);
             var agentProxy = executionContext.GetProxyConfiguration();
             if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
             {
-                proxyUrlWithCred = UrlUtil.GetCredentialEmbeddedUrl(new Uri(agentProxy.ProxyAddress), agentProxy.ProxyUsername, agentProxy.ProxyPassword);
+                proxyUrlWithCred = PluginUtil.GetCredentialEmbeddedUrl(new Uri(agentProxy.ProxyAddress), agentProxy.ProxyUsername, agentProxy.ProxyPassword);
 
                 // uri.absoluteuri will not contains port info if the scheme is http/https and the port is 80/443
                 // however, git.exe always require you provide port info, if nothing passed in, it will use 1080 as default
@@ -404,7 +404,7 @@ namespace Agent.RepositoryPlugin
             if (!await IsRepositoryOriginUrlMatch(executionContext, gitCommandManager, targetPath, repositoryUrl))
             {
                 // Delete source folder
-                IOUtil.DeleteDirectory(targetPath, cancellationToken);
+                PluginUtil.DeleteDirectory(targetPath, cancellationToken);
             }
             else
             {
@@ -477,7 +477,7 @@ namespace Agent.RepositoryPlugin
                     {
                         //fall back
                         executionContext.Warning("Unable to run \"git clean -fdx\" and \"git reset --hard HEAD\" successfully, delete source folder instead.");
-                        IOUtil.DeleteDirectory(targetPath, cancellationToken);
+                        PluginUtil.DeleteDirectory(targetPath, cancellationToken);
                     }
                 }
             }
@@ -545,7 +545,7 @@ namespace Agent.RepositoryPlugin
                     // Otherwise, inject credential into fetch/push url
                     // inject credential into fetch url
                     executionContext.Debug("Inject credential into git remote url.");
-                    ArgUtil.NotNull(repositoryUrlWithCred, nameof(repositoryUrlWithCred));
+                    PluginUtil.NotNull(repositoryUrlWithCred, nameof(repositoryUrlWithCred));
 
                     // inject credential into fetch url
                     executionContext.Debug("Inject credential into git remote fetch url.");
@@ -568,7 +568,7 @@ namespace Agent.RepositoryPlugin
                 if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                 {
                     executionContext.Debug($"Config proxy server '{agentProxy.ProxyAddress}' for git fetch.");
-                    ArgUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
+                    PluginUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
                     additionalFetchArgs.Add($"-c http.proxy=\"{proxyUrlWithCredString}\"");
                     additionalLfsFetchArgs.Add($"-c http.proxy=\"{proxyUrlWithCredString}\"");
                 }
@@ -632,7 +632,7 @@ namespace Agent.RepositoryPlugin
                     {
                         // Inject credential into lfs fetch/push url
                         executionContext.Debug("Inject credential into git-lfs remote url.");
-                        ArgUtil.NotNull(gitLfsUrlWithCred, nameof(gitLfsUrlWithCred));
+                        PluginUtil.NotNull(gitLfsUrlWithCred, nameof(gitLfsUrlWithCred));
 
                         // inject credential into fetch url
                         executionContext.Debug("Inject credential into git-lfs remote fetch url.");
@@ -739,7 +739,7 @@ namespace Agent.RepositoryPlugin
                     if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                     {
                         executionContext.Debug($"Config proxy server '{agentProxy.ProxyAddress}' for git submodule update.");
-                        ArgUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
+                        PluginUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
                         additionalSubmoduleUpdateArgs.Add($"-c http.proxy=\"{proxyUrlWithCredString}\"");
                     }
 
@@ -815,7 +815,7 @@ namespace Agent.RepositoryPlugin
                     if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repositoryUrl))
                     {
                         executionContext.Debug($"Save proxy config for proxy server '{agentProxy.ProxyAddress}' into git config.");
-                        ArgUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
+                        PluginUtil.NotNullOrEmpty(proxyUrlWithCredString, nameof(proxyUrlWithCredString));
 
                         string proxyConfigKey = "http.proxy";
                         string proxyConfigValue = $"\"{proxyUrlWithCredString}\"";
@@ -934,7 +934,7 @@ namespace Agent.RepositoryPlugin
                 if (useClientCert && !string.IsNullOrEmpty(clientCertPrivateKeyAskPassFile) && !exposeCred)
                 {
                     executionContext.Debug("Remove git.sslkey askpass file.");
-                    IOUtil.DeleteFile(clientCertPrivateKeyAskPassFile);
+                    PluginUtil.DeleteFile(clientCertPrivateKeyAskPassFile);
                 }
             }
 
@@ -962,8 +962,8 @@ namespace Agent.RepositoryPlugin
 
         public async Task PostJobCleanupAsync(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository)
         {
-            ArgUtil.NotNull(executionContext, nameof(executionContext));
-            ArgUtil.NotNull(repository, nameof(repository));
+            PluginUtil.NotNull(executionContext, nameof(executionContext));
+            PluginUtil.NotNull(repository, nameof(repository));
 
             executionContext.Output($"Cleaning any cached credential from repository: {repository.Properties.Get<string>("name")} (Git)");
 
@@ -973,12 +973,12 @@ namespace Agent.RepositoryPlugin
             executionContext.Debug($"Repository url={repositoryUrl}");
             executionContext.Debug($"targetPath={targetPath}");
 
-            bool cleanupCreds = StringUtil.ConvertToBoolean(executionContext.TaskVariables.GetValueOrDefault("cleanupcreds")?.Value);
+            bool cleanupCreds = PluginUtil.ConvertToBoolean(executionContext.TaskVariables.GetValueOrDefault("cleanupcreds")?.Value);
             if (cleanupCreds)
             {
                 bool preferGitFromPath;
 #if OS_WINDOWS
-                bool schannelSslBackend = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
+                bool schannelSslBackend = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("agent.gituseschannel")?.Value);
                 executionContext.Debug($"schannelSslBackend={schannelSslBackend}");
 
                 // Determine which git will be use
@@ -987,7 +987,7 @@ namespace Agent.RepositoryPlugin
                 var definitionSetting = executionContext.Variables.GetValueOrDefault("system.prefergitfrompath");
                 if (definitionSetting != null)
                 {
-                    preferGitFromPath = StringUtil.ConvertToBoolean(definitionSetting.Value);
+                    preferGitFromPath = PluginUtil.ConvertToBoolean(definitionSetting.Value);
                 }
                 else
                 {
@@ -999,7 +999,7 @@ namespace Agent.RepositoryPlugin
 #endif
 
                 // Determine do we need to provide creds to git operation
-                bool selfManageGitCreds = StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
+                bool selfManageGitCreds = PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.selfmanagegitcreds")?.Value);
                 if (selfManageGitCreds)
                 {
                     // Customer choose to own git creds by themselves.
@@ -1031,7 +1031,7 @@ namespace Agent.RepositoryPlugin
             string clientCertPrivateKeyAskPassFile = executionContext.TaskVariables.GetValueOrDefault("clientCertAskPass")?.Value;
             if (!string.IsNullOrEmpty(clientCertPrivateKeyAskPassFile))
             {
-                IOUtil.DeleteFile(clientCertPrivateKeyAskPassFile);
+                PluginUtil.DeleteFile(clientCertPrivateKeyAskPassFile);
             }
         }
 

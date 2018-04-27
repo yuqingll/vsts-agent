@@ -603,19 +603,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     {
         public override int Priority => 0;
 
-        public string EntryPoint
-        {
-            get
-            {
-                return GetInput(nameof(EntryPoint));
-            }
-
-            set
-            {
-                SetInput(nameof(EntryPoint), value);
-            }
-        }
-
         public string Stage
         {
             get

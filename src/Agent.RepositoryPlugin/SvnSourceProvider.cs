@@ -19,8 +19,8 @@ namespace Agent.RepositoryPlugin
             CancellationToken cancellationToken)
         {
             // Validate args.
-            ArgUtil.NotNull(executionContext, nameof(executionContext));
-            ArgUtil.NotNull(repository, nameof(repository));
+            PluginUtil.NotNull(executionContext, nameof(executionContext));
+            PluginUtil.NotNull(repository, nameof(repository));
 
             SvnCommandManager svn = new SvnCommandManager();
             svn.Init(executionContext, repository, cancellationToken);
@@ -28,7 +28,7 @@ namespace Agent.RepositoryPlugin
             // Determine the sources directory.
             string sourcesDirectory = repository.Properties.Get<string>("sourcedirecotry");
             executionContext.Debug($"sourcesDirectory={sourcesDirectory}");
-            ArgUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
+            PluginUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
 
             string sourceBranch = repository.Properties.Get<string>("sourcebranch");
             executionContext.Debug($"sourceBranch={sourceBranch}");
@@ -41,19 +41,19 @@ namespace Agent.RepositoryPlugin
 
             executionContext.Debug($"revision={revision}");
 
-            bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
+            bool clean = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
             executionContext.Debug($"clean={clean}");
 
             // Get the definition mappings.
             List<SvnMappingDetails> allMappings = JsonConvert.DeserializeObject<SvnWorkspace>(repository.Properties.Get<string>(EndpointData.SvnWorkspaceMapping)).Mappings;
 
-            if (StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.debug")?.Value))
+            if (PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.debug")?.Value))
             {
                 allMappings.ForEach(m => executionContext.Debug($"ServerPath: {m.ServerPath}, LocalPath: {m.LocalPath}, Depth: {m.Depth}, Revision: {m.Revision}, IgnoreExternals: {m.IgnoreExternals}"));
             }
 
             Dictionary<string, SvnMappingDetails> normalizedMappings = svn.NormalizeMappings(allMappings);
-            if (StringUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.debug")?.Value))
+            if (PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("system.debug")?.Value))
             {
                 executionContext.Debug($"Normalized mappings count: {normalizedMappings.Count}");
                 normalizedMappings.ToList().ForEach(p => executionContext.Debug($"    [{p.Key}] ServerPath: {p.Value.ServerPath}, LocalPath: {p.Value.LocalPath}, Depth: {p.Value.Depth}, Revision: {p.Value.Revision}, IgnoreExternals: {p.Value.IgnoreExternals}"));

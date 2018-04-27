@@ -55,18 +55,18 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             tfsGit1.Properties.Set<string>("name", "g");
             // gated check-in stuff
 
-            var tfsGit2 = new Pipelines.RepositoryResource()
-            {
-                Endpoint = new Pipelines.ServiceEndpointReference() { Name = WellKnownServiceEndpointNames.SystemVssConnection },
-                Id = "ba188439-b224-4878-9c32-f6c39fcada03",
-                Alias = "agent",
-                Type = "TfsGit",
-                Url = new Uri("https://tingweu.visualstudio.com/g/_git/vsts-agent"),
-                Version = "67f37676dd69b3f96e138121d60a680f3726985a",
-            };
-            tfsGit2.Properties.Set<bool>("clean", true);
-            tfsGit2.Properties.Set<string>("branch", "master");
-            tfsGit2.Properties.Set<string>("name", "vsts-agent");
+            // var tfsGit2 = new Pipelines.RepositoryResource()
+            // {
+            //     Endpoint = new Pipelines.ServiceEndpointReference() { Name = WellKnownServiceEndpointNames.SystemVssConnection },
+            //     Id = "ba188439-b224-4878-9c32-f6c39fcada03",
+            //     Alias = "agent",
+            //     Type = "TfsGit",
+            //     Url = new Uri("https://tingweu.visualstudio.com/g/_git/vsts-agent"),
+            //     Version = "67f37676dd69b3f96e138121d60a680f3726985a",
+            // };
+            // tfsGit2.Properties.Set<bool>("clean", true);
+            // tfsGit2.Properties.Set<string>("branch", "master");
+            // tfsGit2.Properties.Set<string>("name", "vsts-agent");
 
             var checkoutTask1 = new Pipelines.TaskStep()
             {
@@ -86,40 +86,40 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 },
                 Reference = new Pipelines.TaskStepDefinitionReference()
                 {
-                    Id = WellKnownAgentPluginTasks.CheckoutTaskId,
+                    Id = new Guid("c61807ba-5e20-4b70-bd8c-3683c9f74003"),
                     Name = "checkout",
                     Version = "1.0.0"
                 }
             };
 
-            var checkoutTask2 = new Pipelines.TaskStep()
-            {
-                Condition = "succeeded()",
-                ContinueOnError = false,
-                Name = "checkout",
-                Id = Guid.NewGuid(),
-                DisplayName = "GetSource",
-                Enabled = true,
-                Inputs = {
-                    {
-                        "Repository", "agent"
-                    },
-                    {
-                        "clean", "true"
-                    }
-                },
-                Reference = new Pipelines.TaskStepDefinitionReference()
-                {
-                    Id = WellKnownAgentPluginTasks.CheckoutTaskId,
-                    Name = "checkout",
-                    Version = "1.0.0"
-                }
-            };
+            //var checkoutTask2 = new Pipelines.TaskStep()
+            // {
+            //     Condition = "succeeded()",
+            //     ContinueOnError = false,
+            //     Name = "checkout",
+            //     Id = Guid.NewGuid(),
+            //     DisplayName = "GetSource",
+            //     Enabled = true,
+            //     Inputs = {
+            //         {
+            //             "Repository", "agent"
+            //         },
+            //         {
+            //             "clean", "true"
+            //         }
+            //     },
+            //     Reference = new Pipelines.TaskStepDefinitionReference()
+            //     {
+            //         Id = WellKnownAgentPluginTasks.CheckoutTaskId,
+            //         Name = "checkout",
+            //         Version = "1.0.0"
+            //     }
+            // };
 
             message.Resources.Repositories.Add(tfsGit1);
-            message.Resources.Repositories.Add(tfsGit2);
+            //message.Resources.Repositories.Add(tfsGit2);
             message.Steps.Insert(0, checkoutTask1);
-            message.Steps.Add(checkoutTask2);
+            //message.Steps.Add(checkoutTask2);
             message.Resources.Endpoints.RemoveAt(0);
 
             // Agent.RunMode

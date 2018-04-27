@@ -24,8 +24,8 @@ namespace Agent.RepositoryPlugin
             CancellationToken cancellationToken)
         {
             // Validate args.
-            ArgUtil.NotNull(executionContext, nameof(executionContext));
-            ArgUtil.NotNull(repository, nameof(repository));
+            PluginUtil.NotNull(executionContext, nameof(executionContext));
+            PluginUtil.NotNull(repository, nameof(repository));
 
 #if OS_WINDOWS
             // Validate .NET Framework 4.6 or higher is installed.
@@ -47,7 +47,7 @@ namespace Agent.RepositoryPlugin
             if (repository.Endpoint != null)
             {
                 var endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
-                ArgUtil.NotNull(endpoint, nameof(endpoint));
+                PluginUtil.NotNull(endpoint, nameof(endpoint));
                 tf.Endpoint = endpoint;
             }
 
@@ -80,7 +80,7 @@ namespace Agent.RepositoryPlugin
 
             // Add TF to the PATH.
             string tfPath = tf.FilePath;
-            ArgUtil.File(tfPath, nameof(tfPath));
+            PluginUtil.FileExists(tfPath, nameof(tfPath));
             executionContext.Output("Prepending0WithDirectoryContaining1 {Constants.PathVariable} {Path.GetFileName(tfPath)}");
             PrependPath(Path.GetDirectoryName(tfPath));
             executionContext.Debug($"PATH: '{Environment.GetEnvironmentVariable("PATH")}'");
@@ -88,7 +88,7 @@ namespace Agent.RepositoryPlugin
 #if OS_WINDOWS
             // Set TFVC_BUILDAGENT_POLICYPATH
             string policyDllPath = Path.Combine(executionContext.Variables.GetValueOrDefault("Agent.ServerOMDirectory")?.Value, "Microsoft.TeamFoundation.VersionControl.Controls.dll");
-            ArgUtil.File(policyDllPath, nameof(policyDllPath));
+            PluginUtil.FileExists(policyDllPath, nameof(policyDllPath));
             const string policyPathEnvKey = "TFVC_BUILDAGENT_POLICYPATH";
             executionContext.Output("SetEnvVar {policyPathEnvKey}");
             Environment.SetEnvironmentVariable(policyPathEnvKey, policyDllPath);
@@ -131,7 +131,7 @@ namespace Agent.RepositoryPlugin
 
             // Determine the workspace name.
             string buildDirectory = executionContext.Variables.GetValueOrDefault("agent.builddirectory")?.Value;
-            ArgUtil.NotNullOrEmpty(buildDirectory, nameof(buildDirectory));
+            PluginUtil.NotNullOrEmpty(buildDirectory, nameof(buildDirectory));
             string workspaceName = $"ws_{Path.GetFileName(buildDirectory)}_{executionContext.Variables.GetValueOrDefault("agent.id")?.Value}";
             executionContext.SetVariable("build.repository.tfvc.workspace", workspaceName);
 
@@ -141,12 +141,12 @@ namespace Agent.RepositoryPlugin
 
             // Determine the sources directory.
             string sourcesDirectory = repository.Properties.Get<string>("sourcedirectory");
-            ArgUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
+            PluginUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
 
             // Attempt to re-use an existing workspace if the command manager supports scorch
             // or if clean is not specified.
             ITfsVCWorkspace existingTFWorkspace = null;
-            bool clean = StringUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
+            bool clean = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.Clean));
             if (tf.Features.HasFlag(TfsVCFeatures.Scorch) || !clean)
             {
                 existingTFWorkspace = WorkspaceUtil.MatchExactWorkspace(
@@ -172,7 +172,7 @@ namespace Agent.RepositoryPlugin
                                 .ForEach(x =>
                                 {
                                     executionContext.Output("Deleting {x.LocalItem}");
-                                    IOUtil.Delete(x.LocalItem, cancellationToken);
+                                    PluginUtil.Delete(x.LocalItem, cancellationToken);
                                 });
                         }
                     }
@@ -198,7 +198,7 @@ namespace Agent.RepositoryPlugin
                                         .ForEach(x =>
                                         {
                                             executionContext.Output("Deleting  {x.LocalItem}");
-                                            IOUtil.Delete(x.LocalItem, cancellationToken);
+                                            PluginUtil.Delete(x.LocalItem, cancellationToken);
                                         });
                                 }
                             }
@@ -245,7 +245,7 @@ namespace Agent.RepositoryPlugin
 
                 // Recreate the sources directory.
                 executionContext.Debug($"Deleting: '{sourcesDirectory}'.");
-                IOUtil.DeleteDirectory(sourcesDirectory, cancellationToken);
+                PluginUtil.DeleteDirectory(sourcesDirectory, cancellationToken);
                 Directory.CreateDirectory(sourcesDirectory);
 
                 // Create the workspace.
@@ -358,7 +358,7 @@ namespace Agent.RepositoryPlugin
                             }
                             finally
                             {
-                                IOUtil.DeleteFile(tempCleanFile);
+                                PluginUtil.DeleteFile(tempCleanFile);
                             }
                         }
                     }
@@ -367,7 +367,7 @@ namespace Agent.RepositoryPlugin
                     tfShelveset = await tf.ShelvesetsAsync(shelveset: shelvesetName);
                     // The above command throws if the shelveset is not found,
                     // so the following assertion should never fail.
-                    ArgUtil.NotNull(tfShelveset, nameof(tfShelveset));
+                    PluginUtil.NotNull(tfShelveset, nameof(tfShelveset));
                 }
 
                 // Unshelve.
@@ -381,7 +381,7 @@ namespace Agent.RepositoryPlugin
                     // Create the comment file for reshelve.
                     StringBuilder comment = new StringBuilder(tfShelveset.Comment ?? string.Empty);
                     string runCi = repository.Properties.Get<string>("GatedRunCI");
-                    bool gatedRunCi = StringUtil.ConvertToBoolean(runCi, true);
+                    bool gatedRunCi = PluginUtil.ConvertToBoolean(runCi, true);
                     if (!gatedRunCi)
                     {
                         if (comment.Length > 0)
@@ -439,7 +439,7 @@ namespace Agent.RepositoryPlugin
                 if (repository.Endpoint != null)
                 {
                     var endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
-                    ArgUtil.NotNull(endpoint, nameof(endpoint));
+                    PluginUtil.NotNull(endpoint, nameof(endpoint));
                     tf.Endpoint = endpoint;
                 }
 
@@ -449,7 +449,7 @@ namespace Agent.RepositoryPlugin
 
                 // Determine the sources directory.
                 string sourcesDirectory = repository.Properties.Get<string>("sourcedirectory");
-                ArgUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
+                PluginUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
 
                 try
                 {
@@ -468,7 +468,7 @@ namespace Agent.RepositoryPlugin
                                 .ForEach(x =>
                                 {
                                     executionContext.Output("Deleting {x.LocalItem}");
-                                    IOUtil.Delete(x.LocalItem, CancellationToken.None);
+                                    PluginUtil.Delete(x.LocalItem, CancellationToken.None);
                                 });
                         }
                     }
@@ -494,7 +494,7 @@ namespace Agent.RepositoryPlugin
                                         .ForEach(x =>
                                         {
                                             executionContext.Output("Deleting {x.LocalItem}");
-                                            IOUtil.Delete(x.LocalItem, CancellationToken.None);
+                                            PluginUtil.Delete(x.LocalItem, CancellationToken.None);
                                         });
                                 }
                             }
@@ -513,12 +513,12 @@ namespace Agent.RepositoryPlugin
         private async Task RemoveConflictingWorkspacesAsync(TfsVCCommandManager tf, ITfsVCWorkspace[] tfWorkspaces, string name, string directory)
         {
             // Validate the args.
-            ArgUtil.NotNullOrEmpty(name, nameof(name));
-            ArgUtil.NotNullOrEmpty(directory, nameof(directory));
+            PluginUtil.NotNullOrEmpty(name, nameof(name));
+            PluginUtil.NotNullOrEmpty(directory, nameof(directory));
 
             // Fixup the directory.
             directory = directory.TrimEnd('/', '\\');
-            ArgUtil.NotNullOrEmpty(directory, nameof(directory));
+            PluginUtil.NotNullOrEmpty(directory, nameof(directory));
             string directorySlash = $"{directory}{Path.DirectorySeparatorChar}";
 
             foreach (ITfsVCWorkspace tfWorkspace in tfWorkspaces ?? new ITfsVCWorkspace[0])
@@ -566,7 +566,7 @@ namespace Agent.RepositoryPlugin
 
         private void PrependPath(string directory)
         {
-            ArgUtil.Directory(directory, nameof(directory));
+            PluginUtil.DirectoryExists(directory, nameof(directory));
 
             // Build the new value.
             string currentPath = Environment.GetEnvironmentVariable("PATH");
@@ -578,7 +578,7 @@ namespace Agent.RepositoryPlugin
 
         private string PrependPath(string path, string currentPath)
         {
-            ArgUtil.NotNullOrEmpty(path, nameof(path));
+            PluginUtil.NotNullOrEmpty(path, nameof(path));
             if (string.IsNullOrEmpty(currentPath))
             {
                 // Careful not to add a trailing separator if the PATH is empty.
@@ -599,8 +599,8 @@ namespace Agent.RepositoryPlugin
                 DefinitionWorkspaceMapping[] definitionMappings,
                 string sourcesDirectory)
             {
-                ArgUtil.NotNullOrEmpty(name, nameof(name));
-                ArgUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
+                PluginUtil.NotNullOrEmpty(name, nameof(name));
+                PluginUtil.NotNullOrEmpty(sourcesDirectory, nameof(sourcesDirectory));
 
                 // Short-circuit early if the sources directory is empty.
                 //
@@ -807,7 +807,7 @@ namespace Agent.RepositoryPlugin
 
         public static bool Test(AgentTaskPluginExecutionContext executionContext, Version minVersion)
         {
-            ArgUtil.NotNull(minVersion, nameof(minVersion));
+            PluginUtil.NotNull(minVersion, nameof(minVersion));
             InitVersions(executionContext);
             executionContext.Debug($"Testing for min NET Framework version: '{minVersion}'");
             return _versions.Any(x => x >= minVersion);

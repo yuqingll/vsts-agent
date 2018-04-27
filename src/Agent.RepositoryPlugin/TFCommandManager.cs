@@ -28,7 +28,7 @@ namespace Agent.RepositoryPlugin
 
         // When output is redirected, TF.exe writes output using the current system code page
         // (i.e. CP_ACP or code page 0). E.g. code page 1252 on an en-US box.
-        protected override Encoding OutputEncoding => StringUtil.GetSystemEncoding();
+        protected override Encoding OutputEncoding => PluginUtil.GetSystemEncoding();
 
         protected override string Switch => "/";
 
@@ -41,15 +41,15 @@ namespace Agent.RepositoryPlugin
         // TODO: Remove AddAsync after last-saved-checkin-metadata problem is fixed properly.
         public async Task AddAsync(string localPath)
         {
-            ArgUtil.NotNullOrEmpty(localPath, nameof(localPath));
+            PluginUtil.NotNullOrEmpty(localPath, nameof(localPath));
             await RunPorcelainCommandAsync(FormatFlags.OmitCollectionUrl, "vc", "add", localPath);
         }
 
         public void CleanupProxySetting()
         {
-            ArgUtil.File(AppConfigRestoreFile, "tf.exe.config.restore");
+            PluginUtil.FileExists(AppConfigRestoreFile, "tf.exe.config.restore");
             ExecutionContext.Debug("Restore default tf.exe.config.");
-            IOUtil.DeleteFile(AppConfigFile);
+            PluginUtil.DeleteFile(AppConfigFile);
             File.Copy(AppConfigRestoreFile, AppConfigFile);
         }
 
@@ -60,13 +60,13 @@ namespace Agent.RepositoryPlugin
 
         public async Task GetAsync(string localPath)
         {
-            ArgUtil.NotNullOrEmpty(localPath, nameof(localPath));
+            PluginUtil.NotNullOrEmpty(localPath, nameof(localPath));
             await RunCommandAsync(FormatFlags.OmitCollectionUrl, "vc", "get", $"/version:{SourceVersion}", "/recursive", "/overwrite", localPath);
         }
 
         public string ResolvePath(string serverPath)
         {
-            ArgUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
+            PluginUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
             string localPath = RunPorcelainCommandAsync(FormatFlags.OmitCollectionUrl, "vc", "resolvePath", serverPath).GetAwaiter().GetResult();
             return localPath?.Trim() ?? string.Empty;
         }
@@ -83,7 +83,7 @@ namespace Agent.RepositoryPlugin
 
         public void SetupProxy(string proxyUrl, string proxyUsername, string proxyPassword)
         {
-            ArgUtil.File(AppConfigFile, "tf.exe.config");
+            PluginUtil.FileExists(AppConfigFile, "tf.exe.config");
             if (!File.Exists(AppConfigRestoreFile))
             {
                 ExecutionContext.Debug("Take snapshot of current appconfig for restore modified appconfig.");
@@ -104,7 +104,7 @@ namespace Agent.RepositoryPlugin
                 }
 
                 var configuration = appConfig.SelectSingleNode("configuration");
-                ArgUtil.NotNull(configuration, "configuration");
+                PluginUtil.NotNull(configuration, "configuration");
 
                 var exist_defaultProxy = appConfig.SelectSingleNode("configuration/system.net/defaultProxy");
                 if (exist_defaultProxy == null)
@@ -151,7 +151,7 @@ namespace Agent.RepositoryPlugin
 
         public void SetupClientCertificate(string clientCert, string clientCertKey, string clientCertArchive, string clientCertPassword)
         {
-            ArgUtil.File(clientCert, nameof(clientCert));
+            PluginUtil.FileExists(clientCert, nameof(clientCert));
             X509Certificate2 cert = new X509Certificate2(clientCert);
             ExecutionContext.Debug($"Set VstsClientCertificate={cert.Thumbprint} for Tf.exe to support client certificate.");
             AdditionalEnvironmentVariables["VstsClientCertificate"] = cert.Thumbprint;
@@ -162,8 +162,8 @@ namespace Agent.RepositoryPlugin
 
         public async Task ShelveAsync(string shelveset, string commentFile, bool move)
         {
-            ArgUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
-            ArgUtil.NotNullOrEmpty(commentFile, nameof(commentFile));
+            PluginUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
+            PluginUtil.NotNullOrEmpty(commentFile, nameof(commentFile));
 
             // TODO: Remove parameter "move" after last-saved-checkin-metadata problem is fixed properly.
             if (move)
@@ -177,20 +177,20 @@ namespace Agent.RepositoryPlugin
 
         public async Task<ITfsVCShelveset> ShelvesetsAsync(string shelveset)
         {
-            ArgUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
+            PluginUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
             string xml = await RunPorcelainCommandAsync("vc", "shelvesets", "/format:xml", shelveset);
 
             // Deserialize the XML.
             // The command returns a non-zero exit code if the shelveset is not found.
             // The assertions performed here should never fail.
             var serializer = new XmlSerializer(typeof(TFShelvesets));
-            ArgUtil.NotNullOrEmpty(xml, nameof(xml));
+            PluginUtil.NotNullOrEmpty(xml, nameof(xml));
             using (var reader = new StringReader(xml))
             {
                 var tfShelvesets = serializer.Deserialize(reader) as TFShelvesets;
-                ArgUtil.NotNull(tfShelvesets, nameof(tfShelvesets));
-                ArgUtil.NotNull(tfShelvesets.Shelvesets, nameof(tfShelvesets.Shelvesets));
-                ArgUtil.Equal(1, tfShelvesets.Shelvesets.Length, nameof(tfShelvesets.Shelvesets.Length));
+                PluginUtil.NotNull(tfShelvesets, nameof(tfShelvesets));
+                PluginUtil.NotNull(tfShelvesets.Shelvesets, nameof(tfShelvesets.Shelvesets));
+                PluginUtil.Equal(1, tfShelvesets.Shelvesets.Length, nameof(tfShelvesets.Shelvesets.Length));
                 return tfShelvesets.Shelvesets[0];
             }
         }
@@ -204,7 +204,7 @@ namespace Agent.RepositoryPlugin
             // then "tf status $(build.sourcesDirectory) /r" will not be able to resolve the workspace.
             // Therefore, the "localPath" parameter is not actually passed to the "status" subcommand -
             // the collection URL and workspace name are used instead.
-            ArgUtil.Equal(SourcesDirectory, localPath, nameof(localPath));
+            PluginUtil.Equal(SourcesDirectory, localPath, nameof(localPath));
             string xml = await RunPorcelainCommandAsync("vc", "status", $"/workspace:{WorkspaceName}", "/recursive", "/nodetect", "/format:xml");
             var serializer = new XmlSerializer(typeof(TFStatus));
             using (var reader = new StringReader(xml ?? string.Empty))
@@ -220,7 +220,7 @@ namespace Agent.RepositoryPlugin
 
         public override async Task<bool> TryWorkspaceDeleteAsync(ITfsVCWorkspace workspace)
         {
-            ArgUtil.NotNull(workspace, nameof(workspace));
+            PluginUtil.NotNull(workspace, nameof(workspace));
             try
             {
                 await RunCommandAsync("vc", "workspace", "/delete", $"{workspace.Name};{workspace.Owner}");
@@ -235,38 +235,38 @@ namespace Agent.RepositoryPlugin
 
         public async Task UndoAsync(string localPath)
         {
-            ArgUtil.NotNullOrEmpty(localPath, nameof(localPath));
+            PluginUtil.NotNullOrEmpty(localPath, nameof(localPath));
             await RunCommandAsync(FormatFlags.OmitCollectionUrl, "vc", "undo", "/recursive", localPath);
         }
 
         public async Task UnshelveAsync(string shelveset)
         {
-            ArgUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
+            PluginUtil.NotNullOrEmpty(shelveset, nameof(shelveset));
             await RunCommandAsync(FormatFlags.OmitCollectionUrl, "vc", "unshelve", shelveset);
         }
 
         public async Task WorkfoldCloakAsync(string serverPath)
         {
-            ArgUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
+            PluginUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
             await RunCommandAsync("vc", "workfold", "/cloak", $"/workspace:{WorkspaceName}", serverPath);
         }
 
         public async Task WorkfoldMapAsync(string serverPath, string localPath)
         {
-            ArgUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
-            ArgUtil.NotNullOrEmpty(localPath, nameof(localPath));
+            PluginUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
+            PluginUtil.NotNullOrEmpty(localPath, nameof(localPath));
             await RunCommandAsync("vc", "workfold", "/map", $"/workspace:{WorkspaceName}", serverPath, localPath);
         }
 
         public async Task WorkfoldUnmapAsync(string serverPath)
         {
-            ArgUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
+            PluginUtil.NotNullOrEmpty(serverPath, nameof(serverPath));
             await RunCommandAsync("vc", "workfold", "/unmap", $"/workspace:{WorkspaceName}", serverPath);
         }
 
         public async Task WorkspaceDeleteAsync(ITfsVCWorkspace workspace)
         {
-            ArgUtil.NotNull(workspace, nameof(workspace));
+            PluginUtil.NotNull(workspace, nameof(workspace));
             await RunCommandAsync("vc", "workspace", "/delete", $"{workspace.Name};{workspace.Owner}");
         }
 
@@ -305,7 +305,7 @@ namespace Agent.RepositoryPlugin
 
         public override async Task WorkspacesRemoveAsync(ITfsVCWorkspace workspace)
         {
-            ArgUtil.NotNull(workspace, nameof(workspace));
+            PluginUtil.NotNull(workspace, nameof(workspace));
             await RunCommandAsync("vc", "workspace", $"/remove:{workspace.Name};{workspace.Owner}");
         }
     }

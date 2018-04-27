@@ -7,22 +7,31 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
+using Microsoft.VisualStudio.Services.Common;
+using Microsoft.VisualStudio.Services.OAuth;
 using Microsoft.VisualStudio.Services.WebApi;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
 namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 {
     public interface IAgentTaskPlugin
     {
-        string FriendlyName { get; }
+        Guid Id { get; }
         string Version { get; }
+        string FriendlyName { get; }
         string Description { get; }
         string HelpMarkDown { get; }
         string Author { get; }
@@ -30,6 +39,14 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         HashSet<string> Stages { get; }
         Task RunAsync(AgentTaskPluginExecutionContext executionContext, CancellationToken token);
     }
+
+    public interface IAgentCommandPlugin
+    {
+        String Area { get; }
+        String Event { get; }
+        Task ProcessCommandAsync(AgentCommandPluginExecutionContext executionContext, CancellationToken token);
+    }
+
     public class AgentTaskPluginExecutionContext
     {
         public AgentTaskPluginExecutionContext()
@@ -44,7 +61,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
         public AgentCertificateSettings GetCertConfiguration()
         {
-            bool skipCertValidation = StringUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("Agent.SkipCertValidation")?.Value);
+            bool skipCertValidation = PluginUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("Agent.SkipCertValidation")?.Value);
             string caFile = this.Variables.GetValueOrDefault("Agent.CAInfo")?.Value;
             string clientCertFile = this.Variables.GetValueOrDefault("Agent.ClientCert")?.Value;
 
@@ -81,7 +98,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             {
                 string proxyUsername = this.Variables.GetValueOrDefault("Agent.ProxyUsername")?.Value;
                 string proxyPassword = this.Variables.GetValueOrDefault("Agent.ProxyPassword")?.Value;
-                List<string> proxyBypassHosts = StringUtil.ConvertFromJson<List<string>>(this.Variables.GetValueOrDefault("Agent.ProxyBypassList")?.Value ?? "[]");
+                List<string> proxyBypassHosts = PluginUtil.ConvertFromJson<List<string>>(this.Variables.GetValueOrDefault("Agent.ProxyBypassList")?.Value ?? "[]");
                 return new AgentWebProxySettings()
                 {
                     ProxyAddress = proxyUrl,
@@ -183,13 +200,10 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         }
     }
 
-    public interface IAgentCommandPlugin
-    {
-        Task ProcessCommandAsync(AgentCommandPluginExecutionContext executionContext, CancellationToken token);
-    }
-
     public class AgentCommandPluginExecutionContext
     {
+        private VssConnection _connection;
+
         public AgentCommandPluginExecutionContext()
         {
             this.Endpoints = new List<ServiceEndpoint>();
@@ -198,16 +212,28 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             this.Variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
         }
 
-
         public string Data { get; set; }
         public Dictionary<string, string> Properties { get; set; }
         public List<ServiceEndpoint> Endpoints { get; set; }
         public List<Pipelines.RepositoryResource> Repositories { get; set; }
         public Dictionary<string, VariableValue> Variables { get; set; }
 
+        [JsonIgnore]
+        public VssConnection VssConnection
+        {
+            get
+            {
+                if (_connection == null)
+                {
+                    _connection = InitializeVssConnection();
+                }
+                return _connection;
+            }
+        }
+
         public void Debug(string message)
         {
-            if (StringUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("system.debug")?.Value))
+            if (PluginUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("system.debug")?.Value))
             {
                 Console.WriteLine($"##[debug]{message}");
             }
@@ -218,9 +244,211 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             Console.WriteLine(message);
         }
 
+        public void Error(string message)
+        {
+            Console.WriteLine($"##vso[task.logissue type=error;]{message}");
+        }
+
+        public void Warning(string message)
+        {
+            Console.WriteLine($"##vso[task.logissue type=warning;]{message}");
+        }
+
         public void Fail(string message)
         {
             Console.Error.WriteLine(message);
+        }
+
+        public AgentCertificateSettings GetCertConfiguration()
+        {
+            bool skipCertValidation = PluginUtil.ConvertToBoolean(this.Variables.GetValueOrDefault("Agent.SkipCertValidation")?.Value);
+            string caFile = this.Variables.GetValueOrDefault("Agent.CAInfo")?.Value;
+            string clientCertFile = this.Variables.GetValueOrDefault("Agent.ClientCert")?.Value;
+
+            if (!string.IsNullOrEmpty(caFile) || !string.IsNullOrEmpty(clientCertFile) || skipCertValidation)
+            {
+                var certConfig = new AgentCertificateSettings();
+                certConfig.SkipServerCertificateValidation = skipCertValidation;
+                certConfig.CACertificateFile = caFile;
+
+                if (!string.IsNullOrEmpty(clientCertFile))
+                {
+                    certConfig.ClientCertificateFile = clientCertFile;
+                    string clientCertKey = this.Variables.GetValueOrDefault("Agent.ClientCertKey")?.Value;
+                    string clientCertArchive = this.Variables.GetValueOrDefault("Agent.ClientCertArchive")?.Value;
+                    string clientCertPassword = this.Variables.GetValueOrDefault("Agent.ClientCertPassword")?.Value;
+
+                    certConfig.ClientCertificatePrivateKeyFile = clientCertKey;
+                    certConfig.ClientCertificateArchiveFile = clientCertArchive;
+                    certConfig.ClientCertificatePassword = clientCertPassword;
+                }
+
+                return certConfig;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        public AgentWebProxySettings GetProxyConfiguration()
+        {
+            string proxyUrl = this.Variables.GetValueOrDefault("Agent.ProxyUrl")?.Value;
+            if (!string.IsNullOrEmpty(proxyUrl))
+            {
+                string proxyUsername = this.Variables.GetValueOrDefault("Agent.ProxyUsername")?.Value;
+                string proxyPassword = this.Variables.GetValueOrDefault("Agent.ProxyPassword")?.Value;
+                List<string> proxyBypassHosts = PluginUtil.ConvertFromJson<List<string>>(this.Variables.GetValueOrDefault("Agent.ProxyBypassList")?.Value ?? "[]");
+                return new AgentWebProxySettings()
+                {
+                    ProxyAddress = proxyUrl,
+                    ProxyUsername = proxyUsername,
+                    ProxyPassword = proxyPassword,
+                    ProxyBypassList = proxyBypassHosts,
+                };
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        public VssConnection InitializeVssConnection()
+        {
+            var headerValues = new List<ProductInfoHeaderValue>();
+            headerValues.Add(new ProductInfoHeaderValue($"VstsAgentCore-Plugin", Variables.GetValueOrDefault("agent.version")?.Value ?? "Unknown"));
+            headerValues.Add(new ProductInfoHeaderValue($"({RuntimeInformation.OSDescription.Trim()})"));
+
+            if (VssClientHttpRequestSettings.Default.UserAgent != null && VssClientHttpRequestSettings.Default.UserAgent.Count > 0)
+            {
+                headerValues.AddRange(VssClientHttpRequestSettings.Default.UserAgent);
+            }
+
+            VssClientHttpRequestSettings.Default.UserAgent = headerValues;
+
+            var certSetting = GetCertConfiguration();
+            if (certSetting != null)
+            {
+                if (!string.IsNullOrEmpty(certSetting.ClientCertificateArchiveFile))
+                {
+                    VssClientHttpRequestSettings.Default.ClientCertificateManager = new CommandPluginClientCertificateManager(certSetting.ClientCertificateArchiveFile, certSetting.ClientCertificatePassword);
+                }
+
+                if (certSetting.SkipServerCertificateValidation)
+                {
+                    VssClientHttpRequestSettings.Default.ServerCertificateValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                }
+            }
+
+            var proxySetting = GetProxyConfiguration();
+            if (proxySetting != null)
+            {
+                if (!string.IsNullOrEmpty(proxySetting.ProxyAddress))
+                {
+                    VssHttpMessageHandler.DefaultWebProxy = new CommandPluginWebProxy(proxySetting.ProxyAddress, proxySetting.ProxyUsername, proxySetting.ProxyPassword, proxySetting.ProxyBypassList);
+                }
+            }
+
+            ServiceEndpoint systemConnection = this.Endpoints.FirstOrDefault(e => string.Equals(e.Name, WellKnownServiceEndpointNames.SystemVssConnection, StringComparison.OrdinalIgnoreCase));
+            PluginUtil.NotNull(systemConnection, nameof(systemConnection));
+            PluginUtil.NotNull(systemConnection.Url, nameof(systemConnection.Url));
+
+            VssCredentials credentials = PluginUtil.GetVssCredential(systemConnection);
+            PluginUtil.NotNull(credentials, nameof(credentials));
+            VssConnection connection = PluginUtil.CreateConnection(systemConnection.Url, credentials);
+            return connection;
+        }
+
+        public sealed class CommandPluginWebProxy : IWebProxy
+        {
+            private string _proxyAddress;
+            private readonly List<Regex> _regExBypassList = new List<Regex>();
+
+            public ICredentials Credentials { get; set; }
+
+            public CommandPluginWebProxy(string proxyAddress, string proxyUsername, string proxyPassword, List<string> proxyBypassList)
+            {
+                _proxyAddress = proxyAddress?.Trim();
+
+                if (string.IsNullOrEmpty(proxyUsername) || string.IsNullOrEmpty(proxyPassword))
+                {
+                    Credentials = CredentialCache.DefaultNetworkCredentials;
+                }
+                else
+                {
+                    Credentials = new NetworkCredential(proxyUsername, proxyPassword);
+                }
+
+                if (proxyBypassList != null)
+                {
+                    foreach (string bypass in proxyBypassList)
+                    {
+                        if (string.IsNullOrWhiteSpace(bypass))
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                Regex bypassRegex = new Regex(bypass.Trim(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ECMAScript);
+                                _regExBypassList.Add(bypassRegex);
+                            }
+                            catch (Exception)
+                            {
+                                // eat all exceptions
+                            }
+                        }
+                    }
+                }
+            }
+
+            public Uri GetProxy(Uri destination)
+            {
+                if (IsBypassed(destination))
+                {
+                    return destination;
+                }
+                else
+                {
+                    return new Uri(_proxyAddress);
+                }
+            }
+
+            public bool IsBypassed(Uri uri)
+            {
+                return string.IsNullOrEmpty(_proxyAddress) || uri.IsLoopback || IsMatchInBypassList(uri);
+            }
+
+            private bool IsMatchInBypassList(Uri input)
+            {
+                string matchUriString = input.IsDefaultPort ?
+                    input.Scheme + "://" + input.Host :
+                    input.Scheme + "://" + input.Host + ":" + input.Port.ToString();
+
+                foreach (Regex r in _regExBypassList)
+                {
+                    if (r.IsMatch(matchUriString))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        public class CommandPluginClientCertificateManager : IVssClientCertificateManager
+        {
+            private readonly X509Certificate2Collection _clientCertificates = new X509Certificate2Collection();
+            public X509Certificate2Collection ClientCertificates => _clientCertificates;
+            public CommandPluginClientCertificateManager(string clientCertificateArchiveFile, string clientCertificatePassword)
+            {
+                if (!string.IsNullOrEmpty(clientCertificateArchiveFile))
+                {
+                    _clientCertificates.Add(new X509Certificate2(clientCertificateArchiveFile, clientCertificatePassword));
+                }
+            }
         }
     }
 
@@ -282,12 +510,13 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         }
     }
 
-    public static class StringUtil
+    public static class PluginUtil
     {
         private static readonly object[] s_defaultFormatArgs = new object[] { null };
+        private static Dictionary<string, object> s_locStrings;
         private static Lazy<JsonSerializerSettings> s_serializerSettings = new Lazy<JsonSerializerSettings>(() => new VssJsonMediaTypeFormatter().SerializerSettings);
 
-        static StringUtil()
+        static PluginUtil()
         {
 #if OS_WINDOWS
             // By default, only Unicode encodings, ASCII, and code page 28591 are supported.
@@ -351,44 +580,64 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             }
         }
 
+        // Do not combine the non-format overload with the format overload.
+        public static string Loc(string locKey)
+        {
+            string locStr = locKey;
+            try
+            {
+                EnsureLoaded();
+                if (s_locStrings.ContainsKey(locKey))
+                {
+                    object item = s_locStrings[locKey];
+                    if (item is string)
+                    {
+                        locStr = item as string;
+                    }
+                    else if (item is JArray)
+                    {
+                        string[] lines = (item as JArray).ToObject<string[]>();
+                        var sb = new StringBuilder();
+                        for (int i = 0; i < lines.Length; i++)
+                        {
+                            if (i > 0)
+                            {
+                                sb.AppendLine();
+                            }
+
+                            sb.Append(lines[i]);
+                        }
+
+                        locStr = sb.ToString();
+                    }
+                }
+                else
+                {
+                    locStr = Format("notFound:{0}", locKey);
+                }
+            }
+            catch (Exception)
+            {
+                // loc strings shouldn't take down agent.  any failures returns loc key
+            }
+
+            return locStr;
+        }
+
+        // Do not combine the non-format overload with the format overload.
+        public static string Loc(string locKey, params object[] args)
+        {
+            return Format(CultureInfo.CurrentCulture, Loc(locKey), args);
+        }
+
         public static string Format(string format, params object[] args)
         {
             return Format(CultureInfo.InvariantCulture, format, args);
         }
 
-        private static string Format(CultureInfo culture, string format, params object[] args)
-        {
-            try
-            {
-                // 1) Protect against argument null exception for the format parameter.
-                // 2) Protect against argument null exception for the args parameter.
-                // 3) Coalesce null or empty args with an array containing one null element.
-                //    This protects against format exceptions where string.Format thinks
-                //    that not enough arguments were supplied, even though the intended arg
-                //    literally is null or an empty array.
-                return string.Format(
-                    culture,
-                    format ?? string.Empty,
-                    args == null || args.Length == 0 ? s_defaultFormatArgs : args);
-            }
-            catch (FormatException)
-            {
-                // TODO: Log that string format failed. Consider moving this into a context base class if that's the only place it's used. Then the current trace scope would be available as well.
-                if (args != null)
-                {
-                    return string.Format(culture, "{0} {1}", format, string.Join(", ", args));
-                }
-
-                return format;
-            }
-        }
-    }
-
-    public static class UrlUtil
-    {
         public static Uri GetCredentialEmbeddedUrl(Uri baseUrl, string username, string password)
         {
-            ArgUtil.NotNull(baseUrl, nameof(baseUrl));
+            PluginUtil.NotNull(baseUrl, nameof(baseUrl));
 
             // return baseurl when there is no username and password
             if (string.IsNullOrEmpty(username) && string.IsNullOrEmpty(password))
@@ -415,14 +664,11 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
             return credUri.Uri;
         }
-    }
 
-    public static class ArgUtil
-    {
-        public static void Directory(string directory, string name)
+        public static void DirectoryExists(string directory, string name)
         {
-            ArgUtil.NotNullOrEmpty(directory, name);
-            if (!System.IO.Directory.Exists(directory))
+            PluginUtil.NotNullOrEmpty(directory, name);
+            if (!Directory.Exists(directory))
             {
                 throw new DirectoryNotFoundException(directory);
             }
@@ -445,10 +691,10 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             }
         }
 
-        public static void File(string fileName, string name)
+        public static void FileExists(string fileName, string name)
         {
-            ArgUtil.NotNullOrEmpty(fileName, name);
-            if (!System.IO.File.Exists(fileName))
+            PluginUtil.NotNullOrEmpty(fileName, name);
+            if (!File.Exists(fileName))
             {
                 throw new FileNotFoundException(fileName);
             }
@@ -470,13 +716,13 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             }
         }
 
-        // public static void NotEmpty(Guid value, string name)
-        // {
-        //     if (value == Guid.Empty)
-        //     {
-        //         throw new ArgumentNullException(name);
-        //     }
-        // }
+        public static void NotEmpty(Guid value, string name)
+        {
+            if (value == Guid.Empty)
+            {
+                throw new ArgumentNullException(name);
+            }
+        }
 
         public static void Null(object value, string name)
         {
@@ -485,10 +731,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
                 throw new ArgumentException(message: $"{name} should be null.", paramName: name);
             }
         }
-    }
 
-    public static class IOUtil
-    {
         public static void Delete(string path, CancellationToken cancellationToken)
         {
             DeleteDirectory(path, cancellationToken);
@@ -502,7 +745,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
         public static void DeleteDirectory(string path, bool contentsOnly, bool continueOnContentDeleteError, CancellationToken cancellationToken)
         {
-            ArgUtil.NotNullOrEmpty(path, nameof(path));
+            PluginUtil.NotNullOrEmpty(path, nameof(path));
             DirectoryInfo directory = new DirectoryInfo(path);
             if (!directory.Exists)
             {
@@ -561,7 +804,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
                                 {
                                     // Check if the item is a directory reparse point.
                                     var subdirectory = item as DirectoryInfo;
-                                    ArgUtil.NotNull(subdirectory, nameof(subdirectory));
+                                    PluginUtil.NotNull(subdirectory, nameof(subdirectory));
                                     if (subdirectory.Attributes.HasFlag(FileAttributes.ReparsePoint))
                                     {
                                         try
@@ -577,7 +820,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
                                             // Deletion of reparse point directories happens in parallel. This case can occur
                                             // when reparse point directory FOO points to some other reparse point directory BAR,
                                             // and BAR is deleted after the DirectoryInfo for FOO has already been initialized.
-                                            File.Delete(subdirectory.FullName);
+                                            System.IO.File.Delete(subdirectory.FullName);
                                         }
                                     }
                                     else
@@ -620,7 +863,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
         public static void DeleteFile(string path)
         {
-            ArgUtil.NotNullOrEmpty(path, nameof(path));
+            PluginUtil.NotNullOrEmpty(path, nameof(path));
             var file = new FileInfo(path);
             if (file.Exists)
             {
@@ -629,13 +872,97 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             }
         }
 
+        public static VssConnection CreateConnection(Uri serverUri, VssCredentials credentials)
+        {
+            VssClientHttpRequestSettings settings = VssClientHttpRequestSettings.Default.Clone();
+
+            int maxRetryRequest;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_RETRY") ?? string.Empty, out maxRetryRequest))
+            {
+                maxRetryRequest = 5;
+            }
+
+            // make sure MaxRetryRequest in range [5, 10]
+            settings.MaxRetryRequest = Math.Min(Math.Max(maxRetryRequest, 5), 10);
+
+            int httpRequestTimeoutSeconds;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_TIMEOUT") ?? string.Empty, out httpRequestTimeoutSeconds))
+            {
+                httpRequestTimeoutSeconds = 100;
+            }
+
+            // make sure httpRequestTimeoutSeconds in range [100, 1200]
+            settings.SendTimeout = TimeSpan.FromSeconds(Math.Min(Math.Max(httpRequestTimeoutSeconds, 100), 1200));
+
+            // Remove Invariant from the list of accepted languages.
+            //
+            // The constructor of VssHttpRequestSettings (base class of VssClientHttpRequestSettings) adds the current
+            // UI culture to the list of accepted languages. The UI culture will be Invariant on OSX/Linux when the
+            // LANG environment variable is not set when the program starts. If Invariant is in the list of accepted
+            // languages, then "System.ArgumentException: The value cannot be null or empty." will be thrown when the
+            // settings are applied to an HttpRequestMessage.
+            settings.AcceptLanguages.Remove(CultureInfo.InvariantCulture);
+
+            VssConnection connection = new VssConnection(serverUri, credentials, settings);
+            return connection;
+        }
+
+        public static VssCredentials GetVssCredential(ServiceEndpoint serviceEndpoint)
+        {
+            NotNull(serviceEndpoint, nameof(serviceEndpoint));
+            NotNull(serviceEndpoint.Authorization, nameof(serviceEndpoint.Authorization));
+            NotNullOrEmpty(serviceEndpoint.Authorization.Scheme, nameof(serviceEndpoint.Authorization.Scheme));
+
+            if (serviceEndpoint.Authorization.Parameters.Count == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(serviceEndpoint));
+            }
+
+            VssCredentials credentials = null;
+            string accessToken;
+            if (serviceEndpoint.Authorization.Scheme == EndpointAuthorizationSchemes.OAuth &&
+                serviceEndpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.AccessToken, out accessToken))
+            {
+                credentials = new VssCredentials(null, new VssOAuthAccessTokenCredential(accessToken), CredentialPromptType.DoNotPrompt);
+            }
+
+            return credentials;
+        }
+
+        private static string Format(CultureInfo culture, string format, params object[] args)
+        {
+            try
+            {
+                // 1) Protect against argument null exception for the format parameter.
+                // 2) Protect against argument null exception for the args parameter.
+                // 3) Coalesce null or empty args with an array containing one null element.
+                //    This protects against format exceptions where string.Format thinks
+                //    that not enough arguments were supplied, even though the intended arg
+                //    literally is null or an empty array.
+                return string.Format(
+                    culture,
+                    format ?? string.Empty,
+                    args == null || args.Length == 0 ? s_defaultFormatArgs : args);
+            }
+            catch (FormatException)
+            {
+                // TODO: Log that string format failed. Consider moving this into a context base class if that's the only place it's used. Then the current trace scope would be available as well.
+                if (args != null)
+                {
+                    return string.Format(culture, "{0} {1}", format, string.Join(", ", args));
+                }
+
+                return format;
+            }
+        }
+
         /// <summary>
         /// Recursively enumerates a directory without following directory reparse points.
         /// </summary>
         private static IEnumerable<FileSystemInfo> Enumerate(DirectoryInfo directory, CancellationTokenSource tokenSource)
         {
-            ArgUtil.NotNull(directory, nameof(directory));
-            ArgUtil.Equal(false, directory.Attributes.HasFlag(FileAttributes.ReparsePoint), nameof(directory.Attributes.HasFlag));
+            PluginUtil.NotNull(directory, nameof(directory));
+            PluginUtil.Equal(false, directory.Attributes.HasFlag(FileAttributes.ReparsePoint), nameof(directory.Attributes.HasFlag));
 
             // Push the directory onto the processing stack.
             var directories = new Stack<DirectoryInfo>(new[] { directory });
@@ -662,19 +989,64 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
         private static void RemoveReadOnly(FileSystemInfo item)
         {
-            ArgUtil.NotNull(item, nameof(item));
+            PluginUtil.NotNull(item, nameof(item));
             if (item.Attributes.HasFlag(FileAttributes.ReadOnly))
             {
                 item.Attributes = item.Attributes & ~FileAttributes.ReadOnly;
             }
         }
-    }
 
-    public static class WhichUtil
-    {
+        private static void EnsureLoaded()
+        {
+            if (s_locStrings == null)
+            {
+                // Determine the list of resource files to load. The fallback "en-US" strings should always be
+                // loaded into the dictionary first.
+                string[] cultureNames;
+                if (string.IsNullOrEmpty(CultureInfo.CurrentCulture.Name) || // Exclude InvariantCulture.
+                    string.Equals(CultureInfo.CurrentCulture.Name, "en-US", StringComparison.Ordinal))
+                {
+                    cultureNames = new[] { "en-US" };
+                }
+                else
+                {
+                    cultureNames = new[] { "en-US", CultureInfo.CurrentCulture.Name };
+                }
+
+                // Initialize the dictionary.
+                var locStrings = new Dictionary<string, object>();
+                foreach (string cultureName in cultureNames)
+                {
+                    // Merge the strings from the file into the instance dictionary.
+                    string file = Path.Combine(GetBinPath(), cultureName, "strings.json");
+                    if (File.Exists(file))
+                    {
+                        foreach (KeyValuePair<string, object> pair in LoadObject<Dictionary<string, object>>(file))
+                        {
+                            locStrings[pair.Key] = pair.Value;
+                        }
+                    }
+                }
+
+                // Store the instance.
+                s_locStrings = locStrings;
+            }
+        }
+
+        public static string GetBinPath()
+        {
+            return Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+        }
+
+        public static T LoadObject<T>(string path)
+        {
+            string json = File.ReadAllText(path, Encoding.UTF8);
+            return ConvertFromJson<T>(json);
+        }
+
         public static string Which(string command, bool require = false)
         {
-            ArgUtil.NotNullOrEmpty(command, nameof(command));
+            PluginUtil.NotNullOrEmpty(command, nameof(command));
 
 #if OS_WINDOWS
             string path = Environment.GetEnvironmentVariable("Path");
@@ -895,8 +1267,8 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             IList<string> contentsToStandardIn,
             CancellationToken cancellationToken)
         {
-            ArgUtil.Null(_proc, nameof(_proc));
-            ArgUtil.NotNullOrEmpty(fileName, nameof(fileName));
+            PluginUtil.Null(_proc, nameof(_proc));
+            PluginUtil.NotNullOrEmpty(fileName, nameof(fileName));
 
             executionContext.Debug("Starting process:");
             executionContext.Debug($"  File name: '{fileName}'");
@@ -935,7 +1307,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
             // code page:
             //      [DllImport("api-ms-win-core-console-l1-1-0.dll", SetLastError = true)]
             //      public extern static uint GetConsoleOutputCP();
-            StringUtil.EnsureRegisterEncodings();
+            PluginUtil.EnsureRegisterEncodings();
 #endif
             if (outputEncoding != null)
             {
@@ -1092,7 +1464,7 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
 
         private async Task CancelAndKillProcessTree(bool killProcessOnCancel)
         {
-            ArgUtil.NotNull(_proc, nameof(_proc));
+            PluginUtil.NotNull(_proc, nameof(_proc));
             if (!killProcessOnCancel)
             {
                 bool sigint_succeed = await SendSIGINT(_sigintTimeout);

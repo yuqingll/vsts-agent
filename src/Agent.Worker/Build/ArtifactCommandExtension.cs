@@ -333,6 +333,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Build
     {
         public static readonly string ContainerFolder = "containerfolder";
         public static readonly string ArtifactName = "artifactname";
+        public static readonly string ArtifactType = "artifacttype";
         public static readonly string Browsable = "Browsable";
     }
 }
