@@ -44,6 +44,7 @@ namespace Agent.RepositoryPlugin
         {
             var repoAlias = executionContext.GetInput("repository", true);
             var repo = executionContext.Repositories.Single(x => string.Equals(x.Alias, repoAlias, StringComparison.OrdinalIgnoreCase));
+            MergeInputs(executionContext, repo);
 
             ISourceProvider sourceProvider = null;
             switch (repo.Type)

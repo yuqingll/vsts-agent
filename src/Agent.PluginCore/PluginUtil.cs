@@ -106,25 +106,10 @@ namespace Agent.PluginCore
 #endif
         }
 
+        #region StringUtil
         public static T ConvertFromJson<T>(string value)
         {
             return JsonConvert.DeserializeObject<T>(value, s_serializerSettings.Value);
-        }
-        public static Encoding GetSystemEncoding()
-        {
-#if OS_WINDOWS
-            // The static constructor should have registered the required encodings.
-            // Code page 0 is equivalent to the current system default (i.e. CP_ACP).
-            // E.g. code page 1252 on an en-US box.
-            return Encoding.GetEncoding(0);
-#else
-            throw new NotSupportedException(nameof(GetSystemEncoding)); // Should never reach here.
-#endif
-        }
-
-        public static void EnsureRegisterEncodings()
-        {
-            // The static constructor should have registered the required encodings.
         }
 
         /// <summary>
@@ -153,6 +138,28 @@ namespace Agent.PluginCore
                 default:
                     return defaultValue;
             }
+        }
+
+        public static void EnsureRegisterEncodings()
+        {
+            // The static constructor should have registered the required encodings.
+        }
+
+        public static string Format(string format, params object[] args)
+        {
+            return Format(CultureInfo.InvariantCulture, format, args);
+        }
+
+        public static Encoding GetSystemEncoding()
+        {
+#if OS_WINDOWS
+            // The static constructor should have registered the required encodings.
+            // Code page 0 is equivalent to the current system default (i.e. CP_ACP).
+            // E.g. code page 1252 on an en-US box.
+            return Encoding.GetEncoding(0);
+#else
+            throw new NotSupportedException(nameof(GetSystemEncoding)); // Should never reach here.
+#endif
         }
 
         // Do not combine the non-format overload with the format overload.
@@ -205,41 +212,72 @@ namespace Agent.PluginCore
             return Format(CultureInfo.CurrentCulture, Loc(locKey), args);
         }
 
-        public static string Format(string format, params object[] args)
+        private static string Format(CultureInfo culture, string format, params object[] args)
         {
-            return Format(CultureInfo.InvariantCulture, format, args);
+            try
+            {
+                // 1) Protect against argument null exception for the format parameter.
+                // 2) Protect against argument null exception for the args parameter.
+                // 3) Coalesce null or empty args with an array containing one null element.
+                //    This protects against format exceptions where string.Format thinks
+                //    that not enough arguments were supplied, even though the intended arg
+                //    literally is null or an empty array.
+                return string.Format(
+                    culture,
+                    format ?? string.Empty,
+                    args == null || args.Length == 0 ? s_defaultFormatArgs : args);
+            }
+            catch (FormatException)
+            {
+                // TODO: Log that string format failed. Consider moving this into a context base class if that's the only place it's used. Then the current trace scope would be available as well.
+                if (args != null)
+                {
+                    return string.Format(culture, "{0} {1}", format, string.Join(", ", args));
+                }
+
+                return format;
+            }
         }
 
-        public static Uri GetCredentialEmbeddedUrl(Uri baseUrl, string username, string password)
+        private static void EnsureLoaded()
         {
-            PluginUtil.NotNull(baseUrl, nameof(baseUrl));
-
-            // return baseurl when there is no username and password
-            if (string.IsNullOrEmpty(username) && string.IsNullOrEmpty(password))
+            if (s_locStrings == null)
             {
-                return baseUrl;
+                // Determine the list of resource files to load. The fallback "en-US" strings should always be
+                // loaded into the dictionary first.
+                string[] cultureNames;
+                if (string.IsNullOrEmpty(CultureInfo.CurrentCulture.Name) || // Exclude InvariantCulture.
+                    string.Equals(CultureInfo.CurrentCulture.Name, "en-US", StringComparison.Ordinal))
+                {
+                    cultureNames = new[] { "en-US" };
+                }
+                else
+                {
+                    cultureNames = new[] { "en-US", CultureInfo.CurrentCulture.Name };
+                }
+
+                // Initialize the dictionary.
+                var locStrings = new Dictionary<string, object>();
+                foreach (string cultureName in cultureNames)
+                {
+                    // Merge the strings from the file into the instance dictionary.
+                    string file = Path.Combine(GetBinPath(), cultureName, "strings.json");
+                    if (File.Exists(file))
+                    {
+                        foreach (KeyValuePair<string, object> pair in LoadObject<Dictionary<string, object>>(file))
+                        {
+                            locStrings[pair.Key] = pair.Value;
+                        }
+                    }
+                }
+
+                // Store the instance.
+                s_locStrings = locStrings;
             }
-
-            UriBuilder credUri = new UriBuilder(baseUrl);
-
-            // ensure we have a username, uribuild will throw if username is empty but password is not.
-            if (string.IsNullOrEmpty(username))
-            {
-                username = "emptyusername";
-            }
-
-            // escape chars in username for uri
-            credUri.UserName = Uri.EscapeDataString(username);
-
-            // escape chars in password for uri
-            if (!string.IsNullOrEmpty(password))
-            {
-                credUri.Password = Uri.EscapeDataString(password);
-            }
-
-            return credUri.Uri;
         }
+        #endregion
 
+        #region ArgUtil
         public static void DirectoryExists(string directory, string name)
         {
             PluginUtil.NotNullOrEmpty(directory, name);
@@ -305,6 +343,110 @@ namespace Agent.PluginCore
             {
                 throw new ArgumentException(message: $"{name} should be null.", paramName: name);
             }
+        }
+        #endregion
+
+        #region UrlUtil
+        public static Uri GetCredentialEmbeddedUrl(Uri baseUrl, string username, string password)
+        {
+            PluginUtil.NotNull(baseUrl, nameof(baseUrl));
+
+            // return baseurl when there is no username and password
+            if (string.IsNullOrEmpty(username) && string.IsNullOrEmpty(password))
+            {
+                return baseUrl;
+            }
+
+            UriBuilder credUri = new UriBuilder(baseUrl);
+
+            // ensure we have a username, uribuild will throw if username is empty but password is not.
+            if (string.IsNullOrEmpty(username))
+            {
+                username = "emptyusername";
+            }
+
+            // escape chars in username for uri
+            credUri.UserName = Uri.EscapeDataString(username);
+
+            // escape chars in password for uri
+            if (!string.IsNullOrEmpty(password))
+            {
+                credUri.Password = Uri.EscapeDataString(password);
+            }
+
+            return credUri.Uri;
+        }
+        #endregion
+
+        #region ApiUtil
+        public static VssConnection CreateConnection(Uri serverUri, VssCredentials credentials)
+        {
+            VssClientHttpRequestSettings settings = VssClientHttpRequestSettings.Default.Clone();
+
+            int maxRetryRequest;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_RETRY") ?? string.Empty, out maxRetryRequest))
+            {
+                maxRetryRequest = 5;
+            }
+
+            // make sure MaxRetryRequest in range [5, 10]
+            settings.MaxRetryRequest = Math.Min(Math.Max(maxRetryRequest, 5), 10);
+
+            int httpRequestTimeoutSeconds;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_TIMEOUT") ?? string.Empty, out httpRequestTimeoutSeconds))
+            {
+                httpRequestTimeoutSeconds = 100;
+            }
+
+            // make sure httpRequestTimeoutSeconds in range [100, 1200]
+            settings.SendTimeout = TimeSpan.FromSeconds(Math.Min(Math.Max(httpRequestTimeoutSeconds, 100), 1200));
+
+            // Remove Invariant from the list of accepted languages.
+            //
+            // The constructor of VssHttpRequestSettings (base class of VssClientHttpRequestSettings) adds the current
+            // UI culture to the list of accepted languages. The UI culture will be Invariant on OSX/Linux when the
+            // LANG environment variable is not set when the program starts. If Invariant is in the list of accepted
+            // languages, then "System.ArgumentException: The value cannot be null or empty." will be thrown when the
+            // settings are applied to an HttpRequestMessage.
+            settings.AcceptLanguages.Remove(CultureInfo.InvariantCulture);
+
+            VssConnection connection = new VssConnection(serverUri, credentials, settings);
+            return connection;
+        }
+
+        public static VssCredentials GetVssCredential(ServiceEndpoint serviceEndpoint)
+        {
+            NotNull(serviceEndpoint, nameof(serviceEndpoint));
+            NotNull(serviceEndpoint.Authorization, nameof(serviceEndpoint.Authorization));
+            NotNullOrEmpty(serviceEndpoint.Authorization.Scheme, nameof(serviceEndpoint.Authorization.Scheme));
+
+            if (serviceEndpoint.Authorization.Parameters.Count == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(serviceEndpoint));
+            }
+
+            VssCredentials credentials = null;
+            string accessToken;
+            if (serviceEndpoint.Authorization.Scheme == EndpointAuthorizationSchemes.OAuth &&
+                serviceEndpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.AccessToken, out accessToken))
+            {
+                credentials = new VssCredentials(null, new VssOAuthAccessTokenCredential(accessToken), CredentialPromptType.DoNotPrompt);
+            }
+
+            return credentials;
+        }
+        #endregion
+
+        #region IOUtil
+        public static T LoadObject<T>(string path)
+        {
+            string json = File.ReadAllText(path, Encoding.UTF8);
+            return ConvertFromJson<T>(json);
+        }
+
+        public static string GetBinPath()
+        {
+            return Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
         }
 
         public static void Delete(string path, CancellationToken cancellationToken)
@@ -447,90 +589,6 @@ namespace Agent.PluginCore
             }
         }
 
-        public static VssConnection CreateConnection(Uri serverUri, VssCredentials credentials)
-        {
-            VssClientHttpRequestSettings settings = VssClientHttpRequestSettings.Default.Clone();
-
-            int maxRetryRequest;
-            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_RETRY") ?? string.Empty, out maxRetryRequest))
-            {
-                maxRetryRequest = 5;
-            }
-
-            // make sure MaxRetryRequest in range [5, 10]
-            settings.MaxRetryRequest = Math.Min(Math.Max(maxRetryRequest, 5), 10);
-
-            int httpRequestTimeoutSeconds;
-            if (!int.TryParse(Environment.GetEnvironmentVariable("VSTS_HTTP_TIMEOUT") ?? string.Empty, out httpRequestTimeoutSeconds))
-            {
-                httpRequestTimeoutSeconds = 100;
-            }
-
-            // make sure httpRequestTimeoutSeconds in range [100, 1200]
-            settings.SendTimeout = TimeSpan.FromSeconds(Math.Min(Math.Max(httpRequestTimeoutSeconds, 100), 1200));
-
-            // Remove Invariant from the list of accepted languages.
-            //
-            // The constructor of VssHttpRequestSettings (base class of VssClientHttpRequestSettings) adds the current
-            // UI culture to the list of accepted languages. The UI culture will be Invariant on OSX/Linux when the
-            // LANG environment variable is not set when the program starts. If Invariant is in the list of accepted
-            // languages, then "System.ArgumentException: The value cannot be null or empty." will be thrown when the
-            // settings are applied to an HttpRequestMessage.
-            settings.AcceptLanguages.Remove(CultureInfo.InvariantCulture);
-
-            VssConnection connection = new VssConnection(serverUri, credentials, settings);
-            return connection;
-        }
-
-        public static VssCredentials GetVssCredential(ServiceEndpoint serviceEndpoint)
-        {
-            NotNull(serviceEndpoint, nameof(serviceEndpoint));
-            NotNull(serviceEndpoint.Authorization, nameof(serviceEndpoint.Authorization));
-            NotNullOrEmpty(serviceEndpoint.Authorization.Scheme, nameof(serviceEndpoint.Authorization.Scheme));
-
-            if (serviceEndpoint.Authorization.Parameters.Count == 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(serviceEndpoint));
-            }
-
-            VssCredentials credentials = null;
-            string accessToken;
-            if (serviceEndpoint.Authorization.Scheme == EndpointAuthorizationSchemes.OAuth &&
-                serviceEndpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.AccessToken, out accessToken))
-            {
-                credentials = new VssCredentials(null, new VssOAuthAccessTokenCredential(accessToken), CredentialPromptType.DoNotPrompt);
-            }
-
-            return credentials;
-        }
-
-        private static string Format(CultureInfo culture, string format, params object[] args)
-        {
-            try
-            {
-                // 1) Protect against argument null exception for the format parameter.
-                // 2) Protect against argument null exception for the args parameter.
-                // 3) Coalesce null or empty args with an array containing one null element.
-                //    This protects against format exceptions where string.Format thinks
-                //    that not enough arguments were supplied, even though the intended arg
-                //    literally is null or an empty array.
-                return string.Format(
-                    culture,
-                    format ?? string.Empty,
-                    args == null || args.Length == 0 ? s_defaultFormatArgs : args);
-            }
-            catch (FormatException)
-            {
-                // TODO: Log that string format failed. Consider moving this into a context base class if that's the only place it's used. Then the current trace scope would be available as well.
-                if (args != null)
-                {
-                    return string.Format(culture, "{0} {1}", format, string.Join(", ", args));
-                }
-
-                return format;
-            }
-        }
-
         /// <summary>
         /// Recursively enumerates a directory without following directory reparse points.
         /// </summary>
@@ -570,55 +628,9 @@ namespace Agent.PluginCore
                 item.Attributes = item.Attributes & ~FileAttributes.ReadOnly;
             }
         }
+        #endregion
 
-        private static void EnsureLoaded()
-        {
-            if (s_locStrings == null)
-            {
-                // Determine the list of resource files to load. The fallback "en-US" strings should always be
-                // loaded into the dictionary first.
-                string[] cultureNames;
-                if (string.IsNullOrEmpty(CultureInfo.CurrentCulture.Name) || // Exclude InvariantCulture.
-                    string.Equals(CultureInfo.CurrentCulture.Name, "en-US", StringComparison.Ordinal))
-                {
-                    cultureNames = new[] { "en-US" };
-                }
-                else
-                {
-                    cultureNames = new[] { "en-US", CultureInfo.CurrentCulture.Name };
-                }
-
-                // Initialize the dictionary.
-                var locStrings = new Dictionary<string, object>();
-                foreach (string cultureName in cultureNames)
-                {
-                    // Merge the strings from the file into the instance dictionary.
-                    string file = Path.Combine(GetBinPath(), cultureName, "strings.json");
-                    if (File.Exists(file))
-                    {
-                        foreach (KeyValuePair<string, object> pair in LoadObject<Dictionary<string, object>>(file))
-                        {
-                            locStrings[pair.Key] = pair.Value;
-                        }
-                    }
-                }
-
-                // Store the instance.
-                s_locStrings = locStrings;
-            }
-        }
-
-        public static string GetBinPath()
-        {
-            return Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
-        }
-
-        public static T LoadObject<T>(string path)
-        {
-            string json = File.ReadAllText(path, Encoding.UTF8);
-            return ConvertFromJson<T>(json);
-        }
-
+        #region WhichUtil
         public static string Which(string command, bool require = false)
         {
             PluginUtil.NotNullOrEmpty(command, nameof(command));
@@ -698,41 +710,12 @@ namespace Agent.PluginCore
 
             return null;
         }
-    }
-
-    public class AsyncManualResetEvent
-    {
-        private volatile TaskCompletionSource<bool> m_tcs = new TaskCompletionSource<bool>();
-
-        public Task WaitAsync() { return m_tcs.Task; }
-
-        public void Set()
-        {
-            var tcs = m_tcs;
-            Task.Factory.StartNew(s => ((TaskCompletionSource<bool>)s).TrySetResult(true),
-                tcs, CancellationToken.None, TaskCreationOptions.PreferFairness, TaskScheduler.Default);
-            tcs.Task.Wait();
-        }
-
-        public void Reset()
-        {
-            while (true)
-            {
-                var tcs = m_tcs;
-                if (!tcs.Task.IsCompleted ||
-                    Interlocked.CompareExchange(ref m_tcs, new TaskCompletionSource<bool>(), tcs) == tcs)
-                    return;
-            }
-        }
+        #endregion
     }
 
     // The implementation of the process invoker does not hook up DataReceivedEvent and ErrorReceivedEvent of Process,
     // instead, we read both STDOUT and STDERR stream manually on seperate thread. 
     // The reason is we find a huge perf issue about process STDOUT/STDERR with those events. 
-    // 
-    // Missing functionalities:
-    //       1. Cancel/Kill process tree
-    //       2. Make sure STDOUT and STDERR not process out of order 
     public sealed class ProcessInvoker
     {
         private Process _proc;
@@ -746,28 +729,39 @@ namespace Agent.PluginCore
         private readonly TimeSpan _sigintTimeout = TimeSpan.FromSeconds(10);
         private readonly TimeSpan _sigtermTimeout = TimeSpan.FromSeconds(5);
         private readonly AgentTaskPluginExecutionContext executionContext;
+
+        private class AsyncManualResetEvent
+        {
+            private volatile TaskCompletionSource<bool> m_tcs = new TaskCompletionSource<bool>();
+
+            public Task WaitAsync() { return m_tcs.Task; }
+
+            public void Set()
+            {
+                var tcs = m_tcs;
+                Task.Factory.StartNew(s => ((TaskCompletionSource<bool>)s).TrySetResult(true),
+                    tcs, CancellationToken.None, TaskCreationOptions.PreferFairness, TaskScheduler.Default);
+                tcs.Task.Wait();
+            }
+
+            public void Reset()
+            {
+                while (true)
+                {
+                    var tcs = m_tcs;
+                    if (!tcs.Task.IsCompleted ||
+                        Interlocked.CompareExchange(ref m_tcs, new TaskCompletionSource<bool>(), tcs) == tcs)
+                        return;
+                }
+            }
+        }
+
         public event EventHandler<ProcessDataReceivedEventArgs> OutputDataReceived;
         public event EventHandler<ProcessDataReceivedEventArgs> ErrorDataReceived;
 
         public ProcessInvoker(AgentTaskPluginExecutionContext executionContext)
         {
             this.executionContext = executionContext;
-        }
-
-        public Task<int> ExecuteAsync(
-            string workingDirectory,
-            string fileName,
-            string arguments,
-            IDictionary<string, string> environment,
-            CancellationToken cancellationToken)
-        {
-            return ExecuteAsync(
-                workingDirectory: workingDirectory,
-                fileName: fileName,
-                arguments: arguments,
-                environment: environment,
-                requireExitCodeZero: false,
-                cancellationToken: cancellationToken);
         }
 
         public Task<int> ExecuteAsync(
@@ -805,28 +799,6 @@ namespace Agent.PluginCore
                 requireExitCodeZero: requireExitCodeZero,
                 outputEncoding: outputEncoding,
                 killProcessOnCancel: false,
-                contentsToStandardIn: null,
-                cancellationToken: cancellationToken);
-        }
-
-        public Task<int> ExecuteAsync(
-            string workingDirectory,
-            string fileName,
-            string arguments,
-            IDictionary<string, string> environment,
-            bool requireExitCodeZero,
-            Encoding outputEncoding,
-            bool killProcessOnCancel,
-            CancellationToken cancellationToken)
-        {
-            return ExecuteAsync(
-                workingDirectory: workingDirectory,
-                fileName: fileName,
-                arguments: arguments,
-                environment: environment,
-                requireExitCodeZero: requireExitCodeZero,
-                outputEncoding: outputEncoding,
-                killProcessOnCancel: killProcessOnCancel,
                 contentsToStandardIn: null,
                 cancellationToken: cancellationToken);
         }
