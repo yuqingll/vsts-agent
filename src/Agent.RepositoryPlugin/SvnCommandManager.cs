@@ -36,14 +36,14 @@ namespace Agent.RepositoryPlugin
             PluginUtil.Equal(true, repository.Url.IsAbsoluteUri, nameof(repository.Url.IsAbsoluteUri));
 
             PluginUtil.NotNull(repository.Endpoint, nameof(repository.Endpoint));
-            ServiceEndpoint endpoint = context.Endpoints.SingleOrDefault(x => x.Id == repository.Endpoint.Id);
+            ServiceEndpoint endpoint = context.Endpoints.Single(x => x.Id == repository.Endpoint.Id);
             PluginUtil.NotNull(endpoint.Data, nameof(endpoint.Data));
             PluginUtil.NotNull(endpoint.Authorization, nameof(endpoint.Authorization));
             PluginUtil.NotNull(endpoint.Authorization.Parameters, nameof(endpoint.Authorization.Parameters));
             PluginUtil.Equal(EndpointAuthorizationSchemes.UsernamePassword, endpoint.Authorization.Scheme, nameof(endpoint.Authorization.Scheme));
 
             _context = context;
-            _endpoint = endpoint;
+            _repository = repository;
             _cancellationToken = cancellationToken;
 
             // Find svn in %Path%
@@ -51,7 +51,7 @@ namespace Agent.RepositoryPlugin
 
             if (string.IsNullOrEmpty(svnPath))
             {
-                throw new Exception("SvnNotInstalled");
+                throw new Exception(PluginUtil.Loc("SvnNotInstalled"));
             }
             else
             {
@@ -63,8 +63,7 @@ namespace Agent.RepositoryPlugin
             endpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.Username, out _username);
             endpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.Password, out _password);
 
-            _acceptUntrusted = endpoint.Data.ContainsKey(EndpointData.SvnAcceptUntrustedCertificates) &&
-            PluginUtil.ConvertToBoolean(endpoint.Data[EndpointData.SvnAcceptUntrustedCertificates], defaultValue: false);
+            _acceptUntrusted = PluginUtil.ConvertToBoolean(repository.Properties.Get<string>(EndpointData.SvnAcceptUntrustedCertificates));
         }
 
         /// <summary>
@@ -86,7 +85,7 @@ namespace Agent.RepositoryPlugin
             if (cleanRepository)
             {
                 // A clean build has been requested
-                PluginUtil.DeleteDirectory(rootPath, CancellationToken.None);
+                PluginUtil.DeleteDirectory(rootPath, _cancellationToken);
                 Directory.CreateDirectory(rootPath);
             }
 
@@ -116,6 +115,89 @@ namespace Agent.RepositoryPlugin
             return maxRevision > 0 ? maxRevision.ToString() : "HEAD";
         }
 
+        private async Task<Dictionary<string, Uri>> GetOldMappings(string rootPath)
+        {
+            if (File.Exists(rootPath))
+            {
+                throw new Exception(PluginUtil.Loc("SvnFileAlreadyExists", rootPath));
+            }
+
+            Dictionary<string, Uri> mappings = new Dictionary<string, Uri>();
+
+            if (Directory.Exists(rootPath))
+            {
+                foreach (string workingDirectoryPath in GetSvnWorkingCopyPaths(rootPath))
+                {
+                    Uri url = await GetRootUrlAsync(workingDirectoryPath);
+
+                    if (url != null)
+                    {
+                        mappings.Add(workingDirectoryPath, url);
+                    }
+                }
+            }
+
+            return mappings;
+        }
+
+        private List<string> GetSvnWorkingCopyPaths(string rootPath)
+        {
+            if (Directory.Exists(Path.Combine(rootPath, ".svn")))
+            {
+                return new List<string>() { rootPath };
+            }
+            else
+            {
+                ConcurrentStack<string> candidates = new ConcurrentStack<string>();
+
+                Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly)
+                    .AsParallel()
+                    .ForAll(fld => candidates.PushRange(GetSvnWorkingCopyPaths(fld).ToArray()));
+
+                return candidates.ToList();
+            }
+        }
+
+        private Dictionary<string, SvnMappingDetails> BuildNewMappings(string rootPath, string sourceBranch, Dictionary<string, SvnMappingDetails> distinctMappings)
+        {
+            Dictionary<string, SvnMappingDetails> mappings = new Dictionary<string, SvnMappingDetails>();
+
+            if (distinctMappings != null && distinctMappings.Count > 0)
+            {
+                foreach (KeyValuePair<string, SvnMappingDetails> mapping in distinctMappings)
+                {
+                    SvnMappingDetails mappingDetails = mapping.Value;
+
+                    string localPath = mappingDetails.LocalPath;
+                    string absoluteLocalPath = Path.Combine(rootPath, localPath);
+
+                    SvnMappingDetails newMappingDetails = new SvnMappingDetails();
+
+                    newMappingDetails.ServerPath = mappingDetails.ServerPath;
+                    newMappingDetails.LocalPath = absoluteLocalPath;
+                    newMappingDetails.Revision = mappingDetails.Revision;
+                    newMappingDetails.Depth = mappingDetails.Depth;
+                    newMappingDetails.IgnoreExternals = mappingDetails.IgnoreExternals;
+
+                    mappings.Add(absoluteLocalPath, newMappingDetails);
+                }
+            }
+            else
+            {
+                SvnMappingDetails newMappingDetails = new SvnMappingDetails();
+
+                newMappingDetails.ServerPath = sourceBranch;
+                newMappingDetails.LocalPath = rootPath;
+                newMappingDetails.Revision = "HEAD";
+                newMappingDetails.Depth = 3;  //Infinity
+                newMappingDetails.IgnoreExternals = true;
+
+                mappings.Add(rootPath, newMappingDetails);
+            }
+
+            return mappings;
+        }
+
         /// <summary>
         /// svn info URL --depth empty --revision <sourceRevision> --xml --username <user> --password <password> --non-interactive [--trust-server-cert]
         /// </summary>
@@ -124,7 +206,7 @@ namespace Agent.RepositoryPlugin
         /// <returns></returns>
         public async Task<long> GetLatestRevisionAsync(string serverPath, string sourceRevision)
         {
-            _context.Debug($@"Get latest revision of: '{_endpoint.Url.AbsoluteUri}' at or before: '{sourceRevision}'.");
+            _context.Debug($@"Get latest revision of: '{_repository.Url.AbsoluteUri}' at or before: '{sourceRevision}'.");
             string xml = await RunPorcelainCommandAsync(
                 "info",
                 BuildSvnUri(serverPath),
@@ -206,212 +288,6 @@ namespace Agent.RepositoryPlugin
 
             // Since the server path starts with the "^/" prefix we return the original path without these two characters.
             return serverPath.Substring(2);
-        }
-
-        /// <summary>
-        /// svn update localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
-        /// </summary>
-        /// <param name="mapping"></param>
-        /// <returns></returns>
-        private async Task UpdateAsync(SvnMappingDetails mapping)
-        {
-            _context.Debug($@"Update '{mapping.LocalPath}'.");
-            await RunCommandAsync(
-                "update",
-                mapping.LocalPath,
-                "--revision", mapping.Revision,
-                "--depth", ToDepthArgument(mapping.Depth),
-                mapping.IgnoreExternals ? "--ignore-externals" : null);
-        }
-
-        /// <summary>
-        /// svn switch localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
-        /// </summary>
-        /// <param name="mapping"></param>
-        /// <returns></returns>
-        private async Task SwitchAsync(SvnMappingDetails mapping)
-        {
-            _context.Debug($@"Switch '{mapping.LocalPath}' to '{mapping.ServerPath}'.");
-            await RunCommandAsync(
-                "switch",
-                $"^/{mapping.ServerPath}",
-                mapping.LocalPath,
-                "--ignore-ancestry",
-                "--revision", mapping.Revision,
-                "--depth", ToDepthArgument(mapping.Depth),
-                mapping.IgnoreExternals ? "--ignore-externals" : null);
-        }
-
-        /// <summary>
-        /// svn checkout localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
-        /// </summary>
-        /// <param name="mapping"></param>
-        /// <returns></returns>
-        private async Task CheckoutAsync(SvnMappingDetails mapping)
-        {
-            _context.Debug($@"Checkout '{mapping.ServerPath}' to '{mapping.LocalPath}'.");
-            await RunCommandAsync(
-                "checkout",
-                mapping.ServerPath,
-                mapping.LocalPath,
-                "--revision", mapping.Revision,
-                "--depth", ToDepthArgument(mapping.Depth),
-                mapping.IgnoreExternals ? "--ignore-externals" : null);
-        }
-
-        /// <summary>
-        /// Removes unused and duplicate mappings.
-        /// </summary>
-        /// <param name="allMappings"></param>
-        /// <returns></returns>
-        public Dictionary<string, SvnMappingDetails> NormalizeMappings(List<SvnMappingDetails> allMappings)
-        {
-            // We use Ordinal comparer because SVN is case sensetive and keys in the dictionary are URLs.
-            Dictionary<string, SvnMappingDetails> distinctMappings = new Dictionary<string, SvnMappingDetails>(StringComparer.Ordinal);
-            HashSet<string> localPaths = new HashSet<string>(StringComparer.Ordinal);
-
-            foreach (SvnMappingDetails map in allMappings)
-            {
-                string localPath = NormalizeRelativePath(map.LocalPath, Path.DirectorySeparatorChar, '/');
-                string serverPath = NormalizeRelativePath(map.ServerPath, '/', '\\');
-
-                if (string.IsNullOrEmpty(serverPath))
-                {
-                    _context.Debug("SvnEmptyServerPath {localPath}");
-                    _context.Debug("SvnMappingIgnored");
-
-                    distinctMappings.Clear();
-                    distinctMappings.Add(string.Empty, map);
-                    break;
-                }
-
-                if (localPaths.Contains(localPath))
-                {
-                    _context.Debug("SvnMappingDuplicateLocal {localPath}");
-                    continue;
-                }
-                else
-                {
-                    localPaths.Add(localPath);
-                }
-
-                if (distinctMappings.ContainsKey(serverPath))
-                {
-                    _context.Debug("SvnMappingDuplicateServer {serverPath}");
-                    continue;
-                }
-
-                // Put normalized values of the local and server paths back into the mapping.
-                map.LocalPath = localPath;
-                map.ServerPath = serverPath;
-
-                distinctMappings.Add(serverPath, map);
-            }
-
-            return distinctMappings;
-        }
-
-        /// <summary>
-        /// Normalizes path separator for server and local paths.
-        /// </summary>
-        /// <param name="path"></param>
-        /// <param name="pathSeparator"></param>
-        /// <param name="altPathSeparator"></param>
-        /// <returns></returns>
-        public string NormalizeRelativePath(string path, char pathSeparator, char altPathSeparator)
-        {
-            string relativePath = (path ?? string.Empty).Replace(altPathSeparator, pathSeparator);
-            relativePath = relativePath.Trim(pathSeparator, ' ');
-
-            if (relativePath.Contains(":") || relativePath.Contains(".."))
-            {
-                throw new Exception("SvnIncorrectRelativePath {relativePath}");
-            }
-
-            return relativePath;
-        }
-
-        private async Task<Dictionary<string, Uri>> GetOldMappings(string rootPath)
-        {
-            if (File.Exists(rootPath))
-            {
-                throw new Exception("SvnFileAlreadyExists {rootPath}");
-            }
-
-            Dictionary<string, Uri> mappings = new Dictionary<string, Uri>();
-
-            if (Directory.Exists(rootPath))
-            {
-                foreach (string workingDirectoryPath in GetSvnWorkingCopyPaths(rootPath))
-                {
-                    Uri url = await GetRootUrlAsync(workingDirectoryPath);
-
-                    if (url != null)
-                    {
-                        mappings.Add(workingDirectoryPath, url);
-                    }
-                }
-            }
-
-            return mappings;
-        }
-
-        private List<string> GetSvnWorkingCopyPaths(string rootPath)
-        {
-            if (Directory.Exists(Path.Combine(rootPath, ".svn")))
-            {
-                return new List<string>() { rootPath };
-            }
-            else
-            {
-                ConcurrentStack<string> candidates = new ConcurrentStack<string>();
-
-                Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly)
-                    .AsParallel()
-                    .ForAll(fld => candidates.PushRange(GetSvnWorkingCopyPaths(fld).ToArray()));
-
-                return candidates.ToList();
-            }
-        }
-
-        private Dictionary<string, SvnMappingDetails> BuildNewMappings(string rootPath, string sourceBranch, Dictionary<string, SvnMappingDetails> distinctMappings)
-        {
-            Dictionary<string, SvnMappingDetails> mappings = new Dictionary<string, SvnMappingDetails>();
-
-            if (distinctMappings != null && distinctMappings.Count > 0)
-            {
-                foreach (KeyValuePair<string, SvnMappingDetails> mapping in distinctMappings)
-                {
-                    SvnMappingDetails mappingDetails = mapping.Value;
-
-                    string localPath = mappingDetails.LocalPath;
-                    string absoluteLocalPath = Path.Combine(rootPath, localPath);
-
-                    SvnMappingDetails newMappingDetails = new SvnMappingDetails();
-
-                    newMappingDetails.ServerPath = mappingDetails.ServerPath;
-                    newMappingDetails.LocalPath = absoluteLocalPath;
-                    newMappingDetails.Revision = mappingDetails.Revision;
-                    newMappingDetails.Depth = mappingDetails.Depth;
-                    newMappingDetails.IgnoreExternals = mappingDetails.IgnoreExternals;
-
-                    mappings.Add(absoluteLocalPath, newMappingDetails);
-                }
-            }
-            else
-            {
-                SvnMappingDetails newMappingDetails = new SvnMappingDetails();
-
-                newMappingDetails.ServerPath = sourceBranch;
-                newMappingDetails.LocalPath = rootPath;
-                newMappingDetails.Revision = "HEAD";
-                newMappingDetails.Depth = 3;  //Infinity
-                newMappingDetails.IgnoreExternals = true;
-
-                mappings.Add(rootPath, newMappingDetails);
-            }
-
-            return mappings;
         }
 
         private async Task<Uri> GetRootUrlAsync(string localPath)
@@ -524,9 +400,61 @@ namespace Agent.RepositoryPlugin
                     PluginUtil.DeleteDirectory(m.Key, CancellationToken.None);
                 });
         }
+
+        /// <summary>
+        /// svn update localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
+        /// </summary>
+        /// <param name="mapping"></param>
+        /// <returns></returns>
+        private async Task UpdateAsync(SvnMappingDetails mapping)
+        {
+            _context.Debug($@"Update '{mapping.LocalPath}'.");
+            await RunCommandAsync(
+                "update",
+                mapping.LocalPath,
+                "--revision", mapping.Revision,
+                "--depth", ToDepthArgument(mapping.Depth),
+                mapping.IgnoreExternals ? "--ignore-externals" : null);
+        }
+
+        /// <summary>
+        /// svn switch localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
+        /// </summary>
+        /// <param name="mapping"></param>
+        /// <returns></returns>
+        private async Task SwitchAsync(SvnMappingDetails mapping)
+        {
+            _context.Debug($@"Switch '{mapping.LocalPath}' to '{mapping.ServerPath}'.");
+            await RunCommandAsync(
+                "switch",
+                $"^/{mapping.ServerPath}",
+                mapping.LocalPath,
+                "--ignore-ancestry",
+                "--revision", mapping.Revision,
+                "--depth", ToDepthArgument(mapping.Depth),
+                mapping.IgnoreExternals ? "--ignore-externals" : null);
+        }
+
+        /// <summary>
+        /// svn checkout localPath --depth empty --revision <sourceRevision> --xml --username lin --password ideafix --non-interactive [--trust-server-cert]
+        /// </summary>
+        /// <param name="mapping"></param>
+        /// <returns></returns>
+        private async Task CheckoutAsync(SvnMappingDetails mapping)
+        {
+            _context.Debug($@"Checkout '{mapping.ServerPath}' to '{mapping.LocalPath}'.");
+            await RunCommandAsync(
+                "checkout",
+                mapping.ServerPath,
+                mapping.LocalPath,
+                "--revision", mapping.Revision,
+                "--depth", ToDepthArgument(mapping.Depth),
+                mapping.IgnoreExternals ? "--ignore-externals" : null);
+        }
+
         private string BuildSvnUri(string serverPath)
         {
-            StringBuilder sb = new StringBuilder(_endpoint.Url.ToString());
+            StringBuilder sb = new StringBuilder(_repository.Url.ToString());
 
             if (!string.IsNullOrEmpty(serverPath))
             {
@@ -551,7 +479,7 @@ namespace Agent.RepositoryPlugin
                     // Validate the arg.
                     if (arg.IndexOfAny(new char[] { '"', '\r', '\n' }) >= 0)
                     {
-                        throw new Exception("InvalidCommandArg {arg}");
+                        throw new Exception(PluginUtil.Loc("InvalidCommandArg", arg));
                     }
 
                     // Add the arg.
@@ -582,7 +510,7 @@ namespace Agent.RepositoryPlugin
 
             // Add proxy setting parameters
             var agentProxy = _context.GetProxyConfiguration();
-            if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(_endpoint.Url))
+            if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(_repository.Url))
             {
                 _context.Debug($"Add proxy setting parameters to '{_svn}' for proxy server '{agentProxy.ProxyAddress}'.");
 
@@ -663,7 +591,7 @@ namespace Agent.RepositoryPlugin
             string arguments = FormatArgumentsWithDefaults(args);
             _context.Command($@"{_svn} {arguments}");
             await processInvoker.ExecuteAsync(
-                workingDirectory: _context.Variables.GetValueOrDefault("agent.workdirectory")?.Value,
+                workingDirectory: _context.Variables.GetValueOrDefault("agent.workfolder")?.Value,
                 fileName: _svn,
                 arguments: arguments,
                 environment: null,
@@ -704,7 +632,7 @@ namespace Agent.RepositoryPlugin
             try
             {
                 await processInvoker.ExecuteAsync(
-                    workingDirectory: _context.Variables.GetValueOrDefault("agent.workdirectory")?.Value,
+                    workingDirectory: _context.Variables.GetValueOrDefault("agent.workfolder")?.Value,
                     fileName: _svn,
                     arguments: arguments,
                     environment: null,
@@ -723,12 +651,84 @@ namespace Agent.RepositoryPlugin
 
         }
 
+        /// <summary>
+        /// Removes unused and duplicate mappings.
+        /// </summary>
+        /// <param name="allMappings"></param>
+        /// <returns></returns>
+        public Dictionary<string, SvnMappingDetails> NormalizeMappings(List<SvnMappingDetails> allMappings)
+        {
+            // We use Ordinal comparer because SVN is case sensetive and keys in the dictionary are URLs.
+            Dictionary<string, SvnMappingDetails> distinctMappings = new Dictionary<string, SvnMappingDetails>(StringComparer.Ordinal);
+            HashSet<string> localPaths = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (SvnMappingDetails map in allMappings)
+            {
+                string localPath = NormalizeRelativePath(map.LocalPath, Path.DirectorySeparatorChar, '/');
+                string serverPath = NormalizeRelativePath(map.ServerPath, '/', '\\');
+
+                if (string.IsNullOrEmpty(serverPath))
+                {
+                    _context.Debug(PluginUtil.Loc("SvnEmptyServerPath", localPath));
+                    _context.Debug(PluginUtil.Loc("SvnMappingIgnored"));
+
+                    distinctMappings.Clear();
+                    distinctMappings.Add(string.Empty, map);
+                    break;
+                }
+
+                if (localPaths.Contains(localPath))
+                {
+                    _context.Debug(PluginUtil.Loc("SvnMappingDuplicateLocal", localPath));
+                    continue;
+                }
+                else
+                {
+                    localPaths.Add(localPath);
+                }
+
+                if (distinctMappings.ContainsKey(serverPath))
+                {
+                    _context.Debug(PluginUtil.Loc("SvnMappingDuplicateServer", serverPath));
+                    continue;
+                }
+
+                // Put normalized values of the local and server paths back into the mapping.
+                map.LocalPath = localPath;
+                map.ServerPath = serverPath;
+
+                distinctMappings.Add(serverPath, map);
+            }
+
+            return distinctMappings;
+        }
+
+        /// <summary>
+        /// Normalizes path separator for server and local paths.
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="pathSeparator"></param>
+        /// <param name="altPathSeparator"></param>
+        /// <returns></returns>
+        public string NormalizeRelativePath(string path, char pathSeparator, char altPathSeparator)
+        {
+            string relativePath = (path ?? string.Empty).Replace(altPathSeparator, pathSeparator);
+            relativePath = relativePath.Trim(pathSeparator, ' ');
+
+            if (relativePath.Contains(":") || relativePath.Contains(".."))
+            {
+                throw new Exception(PluginUtil.Loc("SvnIncorrectRelativePath", relativePath));
+            }
+
+            return relativePath;
+        }
+
 
         // The cancellation token used to stop svn command execution
         private CancellationToken _cancellationToken;
 
-        // The Subversion server endpoint providing URL, username/password, and untrasted certs acceptace information
-        private ServiceEndpoint _endpoint;
+        // The Subversion repository providing URL and untrusted certs acceptace information
+        private Pipelines.RepositoryResource _repository;
 
         // The build commands' execution context
         private AgentTaskPluginExecutionContext _context;

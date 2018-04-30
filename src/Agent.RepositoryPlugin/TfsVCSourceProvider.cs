@@ -29,9 +29,9 @@ namespace Agent.RepositoryPlugin
 
 #if OS_WINDOWS
             // Validate .NET Framework 4.6 or higher is installed.
-            if (!NetFrameworkUtil.Test(executionContext, new Version(4, 6)))
+            if (!PluginUtil.TestNetFrameworkVersion(executionContext, new Version(4, 6)))
             {
-                throw new Exception("MinimumNetFramework46");
+                throw new Exception(PluginUtil.Loc("MinimumNetFramework46"));
             }
 #endif
 
@@ -46,14 +46,16 @@ namespace Agent.RepositoryPlugin
             tf.ExecutionContext = executionContext;
             if (repository.Endpoint != null)
             {
-                var endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
+                // the endpoint should either be the SystemVssConnection (id = guild.empty, name = SystemVssConnection)
+                // or a real service endpoint to external service which has a real id
+                var endpoint = executionContext.Endpoints.Single(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
                 PluginUtil.NotNull(endpoint, nameof(endpoint));
                 tf.Endpoint = endpoint;
             }
 
             // Setup proxy.
             var agentProxy = executionContext.GetProxyConfiguration();
-            if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repository.Url))
+            if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repository.Url))
             {
                 executionContext.Debug($"Configure '{tf.FilePath}' to work through proxy server '{agentProxy.ProxyAddress}'.");
                 tf.SetupProxy(agentProxy.ProxyAddress, agentProxy.ProxyUsername, agentProxy.ProxyPassword);
@@ -61,7 +63,7 @@ namespace Agent.RepositoryPlugin
 
             // Setup client certificate.
             var agentCertManager = executionContext.GetCertConfiguration();
-            if (agentCertManager.SkipServerCertificateValidation)
+            if (agentCertManager != null && agentCertManager.SkipServerCertificateValidation)
             {
 #if OS_WINDOWS
                 executionContext.Debug("TF.exe does not support ignore SSL certificate validation error.");
@@ -70,9 +72,10 @@ namespace Agent.RepositoryPlugin
 #endif
             }
 
-            var configUrl = new Uri(executionContext.Variables.GetValueOrDefault(WellKnownDistributedTaskVariables.TFCollectionUrl)?.Value);
+            // prepare client cert, if the repository's endpoint url match the TFS/VSTS url
+            var systemConnection = executionContext.Endpoints.Single(x => string.Equals(x.Name, WellKnownServiceEndpointNames.SystemVssConnection, StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrEmpty(agentCertManager.ClientCertificateFile) &&
-                Uri.Compare(repository.Url, configUrl, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
+                Uri.Compare(repository.Url, systemConnection.Url, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
             {
                 executionContext.Debug($"Configure '{tf.FilePath}' to work with client cert '{agentCertManager.ClientCertificateFile}'.");
                 tf.SetupClientCertificate(agentCertManager.ClientCertificateFile, agentCertManager.ClientCertificatePrivateKeyFile, agentCertManager.ClientCertificateArchiveFile, agentCertManager.ClientCertificatePassword);
@@ -81,8 +84,12 @@ namespace Agent.RepositoryPlugin
             // Add TF to the PATH.
             string tfPath = tf.FilePath;
             PluginUtil.FileExists(tfPath, nameof(tfPath));
-            executionContext.Output("Prepending0WithDirectoryContaining1 {Constants.PathVariable} {Path.GetFileName(tfPath)}");
-            PrependPath(Path.GetDirectoryName(tfPath));
+#if OS_WINDOWS
+            executionContext.Output(PluginUtil.Loc("Prepending0WithDirectoryContaining1", "Path", Path.GetFileName(tfPath)));
+#else
+            executionContext.Output(PluginUtil.Loc("Prepending0WithDirectoryContaining1", "PATH", Path.GetFileName(tfPath)));
+#endif
+            PluginUtil.PrependPath(Path.GetDirectoryName(tfPath));
             executionContext.Debug($"PATH: '{Environment.GetEnvironmentVariable("PATH")}'");
 
 #if OS_WINDOWS
@@ -90,43 +97,42 @@ namespace Agent.RepositoryPlugin
             string policyDllPath = Path.Combine(executionContext.Variables.GetValueOrDefault("Agent.ServerOMDirectory")?.Value, "Microsoft.TeamFoundation.VersionControl.Controls.dll");
             PluginUtil.FileExists(policyDllPath, nameof(policyDllPath));
             const string policyPathEnvKey = "TFVC_BUILDAGENT_POLICYPATH";
-            executionContext.Output("SetEnvVar {policyPathEnvKey}");
+            executionContext.Output(PluginUtil.Loc("SetEnvVar", policyPathEnvKey));
             Environment.SetEnvironmentVariable(policyPathEnvKey, policyDllPath);
 #endif
 
             // Check if the administrator accepted the license terms of the TEE EULA when configuring the agent.
-            // AgentSettings settings = HostContext.GetService<IConfigurationStore>().GetSettings();
-            // if (tf.Features.HasFlag(TfsVCFeatures.Eula) && settings.AcceptTeeEula)
-            // {
-            //     // Check if the "tf eula -accept" command needs to be run for the current user.
-            //     bool skipEula = false;
-            //     try
-            //     {
-            //         skipEula = tf.TestEulaAccepted();
-            //     }
-            //     catch (Exception ex)
-            //     {
-            //         executionContext.Debug("Unexpected exception while testing whether the TEE EULA has been accepted for the current user.");
-            //         executionContext.Debug(ex.ToString());
-            //     }
+            if (tf.Features.HasFlag(TfsVCFeatures.Eula) && PluginUtil.ConvertToBoolean(executionContext.Variables.GetValueOrDefault("Agent.AcceptTeeEula")?.Value))
+            {
+                // Check if the "tf eula -accept" command needs to be run for the current user.
+                bool skipEula = false;
+                try
+                {
+                    skipEula = tf.TestEulaAccepted();
+                }
+                catch (Exception ex)
+                {
+                    executionContext.Debug("Unexpected exception while testing whether the TEE EULA has been accepted for the current user.");
+                    executionContext.Debug(ex.ToString());
+                }
 
-            //     if (!skipEula)
-            //     {
-            //         // Run the command "tf eula -accept".
-            //         try
-            //         {
-            //             await tf.EulaAsync();
-            //         }
-            //         catch (Exception ex)
-            //         {
-            //             executionContext.Debug(ex.ToString());
-            //             executionContext.Warning(ex.Message);
-            //         }
-            //     }
-            // }
+                if (!skipEula)
+                {
+                    // Run the command "tf eula -accept".
+                    try
+                    {
+                        await tf.EulaAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        executionContext.Debug(ex.ToString());
+                        executionContext.Warning(ex.Message);
+                    }
+                }
+            }
 
             // Get the workspaces.
-            executionContext.Output("QueryingWorkspaceInfo");
+            executionContext.Output(PluginUtil.Loc("QueryingWorkspaceInfo"));
             ITfsVCWorkspace[] tfWorkspaces = await tf.WorkspacesAsync();
 
             // Determine the workspace name.
@@ -171,7 +177,7 @@ namespace Agent.RepositoryPlugin
                                 .ToList()
                                 .ForEach(x =>
                                 {
-                                    executionContext.Output("Deleting {x.LocalItem}");
+                                    executionContext.Output(PluginUtil.Loc("Deleting", x.LocalItem));
                                     PluginUtil.Delete(x.LocalItem, cancellationToken);
                                 });
                         }
@@ -197,7 +203,7 @@ namespace Agent.RepositoryPlugin
                                         .ToList()
                                         .ForEach(x =>
                                         {
-                                            executionContext.Output("Deleting  {x.LocalItem}");
+                                            executionContext.Output(PluginUtil.Loc("Deleting", x.LocalItem));
                                             PluginUtil.Delete(x.LocalItem, cancellationToken);
                                         });
                                 }
@@ -259,9 +265,9 @@ namespace Agent.RepositoryPlugin
 
                 // Sort the definition mappings.
                 definitionMappings =
-                                    (definitionMappings ?? new DefinitionWorkspaceMapping[0])
-                                    .OrderBy(x => x.NormalizedServerPath?.Length ?? 0) // By server path length.
-                                    .ToArray() ?? new DefinitionWorkspaceMapping[0];
+                    (definitionMappings ?? new DefinitionWorkspaceMapping[0])
+                    .OrderBy(x => x.NormalizedServerPath?.Length ?? 0) // By server path length.
+                    .ToArray() ?? new DefinitionWorkspaceMapping[0];
 
                 // Add the definition mappings to the workspace.
                 foreach (DefinitionWorkspaceMapping definitionMapping in definitionMappings)
@@ -413,7 +419,7 @@ namespace Agent.RepositoryPlugin
             }
 
             // Cleanup proxy settings.
-            if (!string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repository.Url))
+            if (agentProxy != null && !string.IsNullOrEmpty(agentProxy.ProxyAddress) && !agentProxy.IsBypassed(repository.Url))
             {
                 executionContext.Debug($"Remove proxy setting for '{tf.FilePath}' to work through proxy server '{agentProxy.ProxyAddress}'.");
                 tf.CleanupProxySetting();
@@ -438,7 +444,9 @@ namespace Agent.RepositoryPlugin
                 tf.ExecutionContext = executionContext;
                 if (repository.Endpoint != null)
                 {
-                    var endpoint = executionContext.Endpoints.SingleOrDefault(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
+                    // the endpoint should either be the SystemVssConnection (id = guild.empty, name = SystemVssConnection)
+                    // or a real service endpoint to external service which has a real id
+                    var endpoint = executionContext.Endpoints.Single(x => (x.Id == Guid.Empty && x.Name == repository.Endpoint.Name) || (x.Id != Guid.Empty && x.Id == repository.Endpoint.Id));
                     PluginUtil.NotNull(endpoint, nameof(endpoint));
                     tf.Endpoint = endpoint;
                 }
@@ -467,7 +475,7 @@ namespace Agent.RepositoryPlugin
                                 .ToList()
                                 .ForEach(x =>
                                 {
-                                    executionContext.Output("Deleting {x.LocalItem}");
+                                    executionContext.Output(PluginUtil.Loc("Deleting", x.LocalItem));
                                     PluginUtil.Delete(x.LocalItem, CancellationToken.None);
                                 });
                         }
@@ -493,7 +501,7 @@ namespace Agent.RepositoryPlugin
                                         .ToList()
                                         .ForEach(x =>
                                         {
-                                            executionContext.Output("Deleting {x.LocalItem}");
+                                            executionContext.Output(PluginUtil.Loc("Deleting", x.LocalItem));
                                             PluginUtil.Delete(x.LocalItem, CancellationToken.None);
                                         });
                                 }
@@ -562,32 +570,6 @@ namespace Agent.RepositoryPlugin
                     }
                 }
             }
-        }
-
-        private void PrependPath(string directory)
-        {
-            PluginUtil.DirectoryExists(directory, nameof(directory));
-
-            // Build the new value.
-            string currentPath = Environment.GetEnvironmentVariable("PATH");
-            string path = PrependPath(directory, currentPath);
-
-            // Update the PATH environment variable.
-            Environment.SetEnvironmentVariable("PATH", path);
-        }
-
-        private string PrependPath(string path, string currentPath)
-        {
-            PluginUtil.NotNullOrEmpty(path, nameof(path));
-            if (string.IsNullOrEmpty(currentPath))
-            {
-                // Careful not to add a trailing separator if the PATH is empty.
-                // On OSX/Linux, a trailing separator indicates that "current directory"
-                // is added to the PATH, which is considered a security risk.
-                return path;
-            }
-
-            return path + Path.PathSeparator + currentPath;
         }
 
         public static class WorkspaceUtil
@@ -798,221 +780,6 @@ namespace Agent.RepositoryPlugin
         {
             Cloak,
             Map,
-        }
-    }
-
-    public static class NetFrameworkUtil
-    {
-        private static List<Version> _versions;
-
-        public static bool Test(AgentTaskPluginExecutionContext executionContext, Version minVersion)
-        {
-            PluginUtil.NotNull(minVersion, nameof(minVersion));
-            InitVersions(executionContext);
-            executionContext.Debug($"Testing for min NET Framework version: '{minVersion}'");
-            return _versions.Any(x => x >= minVersion);
-        }
-
-        private static void InitVersions(AgentTaskPluginExecutionContext executionContext)
-        {
-            // See http://msdn.microsoft.com/en-us/library/hh925568(v=vs.110).aspx for details on how to detect framework versions
-            // Also see http://support.microsoft.com/kb/318785
-
-            if (_versions != null)
-            {
-                return;
-            }
-
-            var versions = new List<Version>();
-
-            // Check for install root.
-            string installRoot = GetHklmValue(executionContext, @"SOFTWARE\Microsoft\.NETFramework", "InstallRoot") as string;
-            if (!string.IsNullOrEmpty(installRoot))
-            {
-                // Get the version sub key names.
-                string ndpKeyName = @"SOFTWARE\Microsoft\NET Framework Setup\NDP";
-                string[] versionSubKeyNames = GetHklmSubKeyNames(executionContext, ndpKeyName)
-                    .Where(x => x.StartsWith("v", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                foreach (string versionSubKeyName in versionSubKeyNames)
-                {
-                    string versionKeyName = $@"{ndpKeyName}\{versionSubKeyName}";
-
-                    // Test for the version value.
-                    string version = GetHklmValue(executionContext, versionKeyName, "Version") as string;
-                    if (!string.IsNullOrEmpty(version))
-                    {
-                        // Test for the install flag.
-                        object install = GetHklmValue(executionContext, versionKeyName, "Install");
-                        if (!(install is int) || (int)install != 1)
-                        {
-                            continue;
-                        }
-
-                        // Test for the install path.
-                        string installPath = Path.Combine(installRoot, versionSubKeyName);
-                        executionContext.Debug($"Testing directory: '{installPath}'");
-                        if (!Directory.Exists(installPath))
-                        {
-                            continue;
-                        }
-
-                        // Parse the version from the sub key name.
-                        Version versionObject;
-                        if (!Version.TryParse(versionSubKeyName.Substring(1), out versionObject)) // skip over the leading "v".
-                        {
-                            executionContext.Debug($"Unable to parse version from sub key name: '{versionSubKeyName}'");
-                            continue;
-                        }
-
-                        executionContext.Debug($"Found version: {versionObject}");
-                        versions.Add(versionObject);
-                        continue;
-                    }
-
-                    // Test if deprecated.
-                    if (string.Equals(GetHklmValue(executionContext, versionKeyName, string.Empty) as string, "deprecated", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    // Get the profile key names.
-                    string[] profileKeyNames = GetHklmSubKeyNames(executionContext, versionKeyName)
-                        .Select(x => $@"{versionKeyName}\{x}")
-                        .ToArray();
-                    foreach (string profileKeyName in profileKeyNames)
-                    {
-                        // Test for the version value.
-                        version = GetHklmValue(executionContext, profileKeyName, "Version") as string;
-                        if (string.IsNullOrEmpty(version))
-                        {
-                            continue;
-                        }
-
-                        // Test for the install flag.
-                        object install = GetHklmValue(executionContext, profileKeyName, "Install");
-                        if (!(install is int) || (int)install != 1)
-                        {
-                            continue;
-                        }
-
-                        // Test for the install path.
-                        string installPath = (GetHklmValue(executionContext, profileKeyName, "InstallPath") as string ?? string.Empty)
-                            .TrimEnd(Path.DirectorySeparatorChar);
-                        if (string.IsNullOrEmpty(installPath))
-                        {
-                            continue;
-                        }
-
-                        // Determine the version string.
-                        //
-                        // Use a range since customer might install beta/preview .NET Framework.
-                        string versionString = null;
-                        object releaseObject = GetHklmValue(executionContext, profileKeyName, "Release");
-                        if (releaseObject != null)
-                        {
-                            executionContext.Debug("Type is " + releaseObject.GetType().FullName);
-                        }
-
-                        if (releaseObject is int)
-                        {
-                            int release = (int)releaseObject;
-                            if (release == 378389)
-                            {
-                                versionString = "4.5.0";
-                            }
-                            else if (release > 378389 && release <= 378758)
-                            {
-                                versionString = "4.5.1";
-                            }
-                            else if (release > 378758 && release <= 379893)
-                            {
-                                versionString = "4.5.2";
-                            }
-                            else if (release > 379893 && release <= 380995)
-                            {
-                                versionString = "4.5.3";
-                            }
-                            else if (release > 380995 && release <= 393297)
-                            {
-                                versionString = "4.6.0";
-                            }
-                            else if (release > 393297 && release <= 394271)
-                            {
-                                versionString = "4.6.1";
-                            }
-                            else if (release > 394271 && release <= 394806)
-                            {
-                                versionString = "4.6.2";
-                            }
-                            else if (release > 394806)
-                            {
-                                versionString = "4.7.0";
-                            }
-                            else
-                            {
-                                executionContext.Debug($"Release '{release}' did not fall into an expected range.");
-                            }
-                        }
-
-                        if (string.IsNullOrEmpty(versionString))
-                        {
-                            continue;
-                        }
-
-                        executionContext.Debug($"Interpreted version: {versionString}");
-                        versions.Add(new Version(versionString));
-                    }
-                }
-            }
-
-            executionContext.Debug($"Found {versions.Count} versions:");
-            foreach (Version versionObject in versions)
-            {
-                executionContext.Debug($" {versionObject}");
-            }
-
-            Interlocked.CompareExchange(ref _versions, versions, null);
-        }
-
-        private static string[] GetHklmSubKeyNames(AgentTaskPluginExecutionContext executionContext, string keyName)
-        {
-            RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName);
-            if (key == null)
-            {
-                executionContext.Debug($"Key name '{keyName}' is null.");
-                return new string[0];
-            }
-
-            try
-            {
-                string[] subKeyNames = key.GetSubKeyNames() ?? new string[0];
-                executionContext.Debug($"Key name '{keyName}' contains sub keys:");
-                foreach (string subKeyName in subKeyNames)
-                {
-                    executionContext.Debug($" '{subKeyName}'");
-                }
-
-                return subKeyNames;
-            }
-            finally
-            {
-                key.Dispose();
-            }
-        }
-
-        private static object GetHklmValue(AgentTaskPluginExecutionContext executionContext, string keyName, string valueName)
-        {
-            keyName = $@"HKEY_LOCAL_MACHINE\{keyName}";
-            object value = Registry.GetValue(keyName, valueName, defaultValue: null);
-            if (object.ReferenceEquals(value, null))
-            {
-                executionContext.Debug($"Key name '{keyName}', value name '{valueName}' is null.");
-                return null;
-            }
-
-            executionContext.Debug($"Key name '{keyName}', value name '{valueName}': '{value}'");
-            return value;
         }
     }
 }

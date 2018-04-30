@@ -17,7 +17,7 @@ namespace Agent.RepositoryPlugin
 
         protected override string Switch => "-";
 
-        public string FilePath => Path.Combine(ExecutionContext.Variables.GetValueOrDefault("agent.externalsdirectory")?.Value, "tee", "tf");
+        public string FilePath => Path.Combine(ExecutionContext.Variables.GetValueOrDefault("agent.homedirectory")?.Value, "externals", "tee", "tf");
 
         // TODO: Remove AddAsync after last-saved-checkin-metadata problem is fixed properly.
         public async Task AddAsync(string localPath)

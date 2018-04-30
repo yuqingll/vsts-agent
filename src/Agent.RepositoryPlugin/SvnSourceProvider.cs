@@ -61,7 +61,7 @@ namespace Agent.RepositoryPlugin
 
             string normalizedBranch = svn.NormalizeRelativePath(sourceBranch, '/', '\\');
 
-            executionContext.Output($"SvnSyncingRepo {repository.Properties.Get<string>("name")}");
+            executionContext.Output(PluginUtil.Loc("SvnSyncingRepo", repository.Properties.Get<string>("name")));
 
             string effectiveRevision = await svn.UpdateWorkspace(
                 sourcesDirectory,
@@ -70,7 +70,7 @@ namespace Agent.RepositoryPlugin
                 normalizedBranch,
                 revision);
 
-            executionContext.Output($"SvnBranchCheckedOut {normalizedBranch} {repository.Properties.Get<string>("name")} {effectiveRevision}");
+            executionContext.Output(PluginUtil.Loc("SvnBranchCheckedOut", normalizedBranch, repository.Properties.Get<string>("name"), effectiveRevision));
         }
 
         public Task PostJobCleanupAsync(AgentTaskPluginExecutionContext executionContext, Pipelines.RepositoryResource repository)

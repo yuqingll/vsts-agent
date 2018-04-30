@@ -30,7 +30,7 @@ namespace Agent.RepositoryPlugin
 
             if (gitVersion < requiredVersion && throwOnNotMatch)
             {
-                throw new NotSupportedException($"MinRequiredGitVersion {requiredVersion}, {gitPath}, {gitVersion}");
+                throw new NotSupportedException(PluginUtil.Loc("MinRequiredGitVersion", requiredVersion, gitPath, gitVersion));
             }
 
             return gitVersion >= requiredVersion;
@@ -43,36 +43,10 @@ namespace Agent.RepositoryPlugin
 
             if (gitLfsVersion < requiredVersion && throwOnNotMatch)
             {
-                throw new NotSupportedException($"MinRequiredGitLfsVersion {requiredVersion} {gitLfsPath} {gitLfsVersion}");
+                throw new NotSupportedException(PluginUtil.Loc("MinRequiredGitLfsVersion", requiredVersion, gitLfsPath, gitLfsVersion));
             }
 
             return gitLfsVersion >= requiredVersion;
-        }
-
-        public static string PrependPath(string path, string currentPath)
-        {
-            PluginUtil.NotNullOrEmpty(path, nameof(path));
-            if (string.IsNullOrEmpty(currentPath))
-            {
-                // Careful not to add a trailing separator if the PATH is empty.
-                // On OSX/Linux, a trailing separator indicates that "current directory"
-                // is added to the PATH, which is considered a security risk.
-                return path;
-            }
-
-            return path + Path.PathSeparator + currentPath;
-        }
-
-        public void PrependPath(string directory)
-        {
-            PluginUtil.DirectoryExists(directory, nameof(directory));
-
-            // Build the new value.
-            string currentPath = Environment.GetEnvironmentVariable("PATH");
-            string path = PrependPath(directory, currentPath);
-
-            // Update the PATH environment variable.
-            Environment.SetEnvironmentVariable("PATH", path);
         }
 
         public async Task LoadGitExecutionInfo(AgentTaskPluginExecutionContext context, bool useBuiltInGit)
@@ -81,11 +55,13 @@ namespace Agent.RepositoryPlugin
             if (useBuiltInGit)
             {
 #if OS_WINDOWS
-                gitPath = Path.Combine(context.Variables.GetValueOrDefault("agent.homedirectory")?.Value, "externals", "git", "cmd", $"git.exe");
+                string agentHomeDir = context.Variables.GetValueOrDefault("agent.homedirectory")?.Value;
+                PluginUtil.NotNullOrEmpty(agentHomeDir, nameof(agentHomeDir));
+                gitPath = Path.Combine(agentHomeDir, "externals", "git", "cmd", $"git.exe");
 
                 // Prepend the PATH.
-                context.Output($"Prepending0WithDirectoryContaining1 PATH {Path.GetFileName(gitPath)}");
-                PrependPath(Path.GetDirectoryName(gitPath));
+                context.Output(PluginUtil.Loc("Prepending0WithDirectoryContaining1", "Path", Path.GetFileName(gitPath)));
+                PluginUtil.PrependPath(Path.GetDirectoryName(gitPath));
                 context.Debug($"PATH: '{Environment.GetEnvironmentVariable("PATH")}'");
 #else
                 // There is no built-in git for OSX/Linux
@@ -124,11 +100,11 @@ namespace Agent.RepositoryPlugin
             Version recommendGitVersion = new Version(2, 9);
             if (!EnsureGitVersion(recommendGitVersion, throwOnNotMatch: false))
             {
-                context.Output($"UpgradeToLatestGit  {recommendGitVersion}, {gitVersion}");
+                context.Output(PluginUtil.Loc("UpgradeToLatestGit", recommendGitVersion, gitVersion));
             }
 
             // Set the user agent.
-            gitHttpUserAgentEnv = $"git/{gitVersion.ToString()} (vsts-agent-git/{context.Variables.GetValueOrDefault("agent.version")?.Value ?? string.Empty})";
+            gitHttpUserAgentEnv = $"git/{gitVersion.ToString()} (vsts-agent-git/{context.Variables.GetValueOrDefault("agent.version")?.Value ?? "unknown"})";
             context.Debug($"Set git useragent to: {gitHttpUserAgentEnv}.");
         }
 
@@ -386,9 +362,11 @@ namespace Agent.RepositoryPlugin
         public async Task<Version> GitVersion(AgentTaskPluginExecutionContext context)
         {
             context.Debug("Get git version.");
+            string workingDir = context.Variables.GetValueOrDefault("agent.workfolder")?.Value;
+            PluginUtil.DirectoryExists(workingDir, "agent.workfolder");
             Version version = null;
             List<string> outputStrings = new List<string>();
-            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory")?.Value, "version", null, outputStrings);
+            int exitCode = await ExecuteGitCommandAsync(context, workingDir, "version", null, outputStrings);
             context.Output($"{string.Join(Environment.NewLine, outputStrings)}");
             if (exitCode == 0)
             {
@@ -417,9 +395,11 @@ namespace Agent.RepositoryPlugin
         public async Task<Version> GitLfsVersion(AgentTaskPluginExecutionContext context)
         {
             context.Debug("Get git-lfs version.");
+            string workingDir = context.Variables.GetValueOrDefault("agent.workfolder")?.Value;
+            PluginUtil.DirectoryExists(workingDir, "agent.workfolder");
             Version version = null;
             List<string> outputStrings = new List<string>();
-            int exitCode = await ExecuteGitCommandAsync(context, context.Variables.GetValueOrDefault("agent.workdirectory")?.Value, "lfs version", null, outputStrings);
+            int exitCode = await ExecuteGitCommandAsync(context, workingDir, "lfs version", null, outputStrings);
             context.Output($"{string.Join(Environment.NewLine, outputStrings)}");
             if (exitCode == 0)
             {

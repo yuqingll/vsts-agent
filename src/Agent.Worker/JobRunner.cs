@@ -120,7 +120,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             //message.Resources.Repositories.Add(tfsGit2);
             message.Steps.Insert(0, checkoutTask1);
             //message.Steps.Add(checkoutTask2);
-            message.Resources.Endpoints.RemoveAt(0);
+            //message.Resources.Endpoints.RemoveAt(0);
 
             // Agent.RunMode
             RunMode runMode;
@@ -236,6 +236,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 jobContext.Variables.Set(Constants.Variables.Agent.RootDirectory, IOUtil.GetWorkPath(HostContext));
 #if OS_WINDOWS
                 jobContext.Variables.Set(Constants.Variables.Agent.ServerOMDirectory, Path.Combine(IOUtil.GetExternalsPath(), Constants.Path.ServerOMDirectory));
+#else
+                jobContext.Variables.Set(Constants.Variables.Agent.AcceptTeeEula, settings.AcceptTeeEula.ToString());
 #endif
                 jobContext.Variables.Set(Constants.Variables.Agent.WorkFolder, IOUtil.GetWorkPath(HostContext));
                 jobContext.Variables.Set(Constants.Variables.System.WorkFolder, IOUtil.GetWorkPath(HostContext));

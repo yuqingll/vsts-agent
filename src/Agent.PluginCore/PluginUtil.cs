@@ -24,6 +24,7 @@ using Microsoft.VisualStudio.Services.WebApi;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
+using Microsoft.Win32;
 
 namespace Agent.PluginCore
 {
@@ -90,6 +91,7 @@ namespace Agent.PluginCore
         private static readonly object[] s_defaultFormatArgs = new object[] { null };
         private static Dictionary<string, object> s_locStrings;
         private static Lazy<JsonSerializerSettings> s_serializerSettings = new Lazy<JsonSerializerSettings>(() => new VssJsonMediaTypeFormatter().SerializerSettings);
+        private static List<Version> _versions;
 
         static PluginUtil()
         {
@@ -105,6 +107,218 @@ namespace Agent.PluginCore
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 #endif
         }
+
+        #region NetFrameworkUtil
+        public static bool TestNetFrameworkVersion(AgentTaskPluginExecutionContext executionContext, Version minVersion)
+        {
+            PluginUtil.NotNull(minVersion, nameof(minVersion));
+            InitVersions(executionContext);
+            executionContext.Debug($"Testing for min NET Framework version: '{minVersion}'");
+            return _versions.Any(x => x >= minVersion);
+        }
+
+        private static void InitVersions(AgentTaskPluginExecutionContext executionContext)
+        {
+            // See http://msdn.microsoft.com/en-us/library/hh925568(v=vs.110).aspx for details on how to detect framework versions
+            // Also see http://support.microsoft.com/kb/318785
+
+            if (_versions != null)
+            {
+                return;
+            }
+
+            var versions = new List<Version>();
+
+            // Check for install root.
+            string installRoot = GetHklmValue(executionContext, @"SOFTWARE\Microsoft\.NETFramework", "InstallRoot") as string;
+            if (!string.IsNullOrEmpty(installRoot))
+            {
+                // Get the version sub key names.
+                string ndpKeyName = @"SOFTWARE\Microsoft\NET Framework Setup\NDP";
+                string[] versionSubKeyNames = GetHklmSubKeyNames(executionContext, ndpKeyName)
+                    .Where(x => x.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                foreach (string versionSubKeyName in versionSubKeyNames)
+                {
+                    string versionKeyName = $@"{ndpKeyName}\{versionSubKeyName}";
+
+                    // Test for the version value.
+                    string version = GetHklmValue(executionContext, versionKeyName, "Version") as string;
+                    if (!string.IsNullOrEmpty(version))
+                    {
+                        // Test for the install flag.
+                        object install = GetHklmValue(executionContext, versionKeyName, "Install");
+                        if (!(install is int) || (int)install != 1)
+                        {
+                            continue;
+                        }
+
+                        // Test for the install path.
+                        string installPath = Path.Combine(installRoot, versionSubKeyName);
+                        executionContext.Debug($"Testing directory: '{installPath}'");
+                        if (!Directory.Exists(installPath))
+                        {
+                            continue;
+                        }
+
+                        // Parse the version from the sub key name.
+                        Version versionObject;
+                        if (!Version.TryParse(versionSubKeyName.Substring(1), out versionObject)) // skip over the leading "v".
+                        {
+                            executionContext.Debug($"Unable to parse version from sub key name: '{versionSubKeyName}'");
+                            continue;
+                        }
+
+                        executionContext.Debug($"Found version: {versionObject}");
+                        versions.Add(versionObject);
+                        continue;
+                    }
+
+                    // Test if deprecated.
+                    if (string.Equals(GetHklmValue(executionContext, versionKeyName, string.Empty) as string, "deprecated", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // Get the profile key names.
+                    string[] profileKeyNames = GetHklmSubKeyNames(executionContext, versionKeyName)
+                        .Select(x => $@"{versionKeyName}\{x}")
+                        .ToArray();
+                    foreach (string profileKeyName in profileKeyNames)
+                    {
+                        // Test for the version value.
+                        version = GetHklmValue(executionContext, profileKeyName, "Version") as string;
+                        if (string.IsNullOrEmpty(version))
+                        {
+                            continue;
+                        }
+
+                        // Test for the install flag.
+                        object install = GetHklmValue(executionContext, profileKeyName, "Install");
+                        if (!(install is int) || (int)install != 1)
+                        {
+                            continue;
+                        }
+
+                        // Test for the install path.
+                        string installPath = (GetHklmValue(executionContext, profileKeyName, "InstallPath") as string ?? string.Empty)
+                            .TrimEnd(Path.DirectorySeparatorChar);
+                        if (string.IsNullOrEmpty(installPath))
+                        {
+                            continue;
+                        }
+
+                        // Determine the version string.
+                        //
+                        // Use a range since customer might install beta/preview .NET Framework.
+                        string versionString = null;
+                        object releaseObject = GetHklmValue(executionContext, profileKeyName, "Release");
+                        if (releaseObject != null)
+                        {
+                            executionContext.Debug("Type is " + releaseObject.GetType().FullName);
+                        }
+
+                        if (releaseObject is int)
+                        {
+                            int release = (int)releaseObject;
+                            if (release == 378389)
+                            {
+                                versionString = "4.5.0";
+                            }
+                            else if (release > 378389 && release <= 378758)
+                            {
+                                versionString = "4.5.1";
+                            }
+                            else if (release > 378758 && release <= 379893)
+                            {
+                                versionString = "4.5.2";
+                            }
+                            else if (release > 379893 && release <= 380995)
+                            {
+                                versionString = "4.5.3";
+                            }
+                            else if (release > 380995 && release <= 393297)
+                            {
+                                versionString = "4.6.0";
+                            }
+                            else if (release > 393297 && release <= 394271)
+                            {
+                                versionString = "4.6.1";
+                            }
+                            else if (release > 394271 && release <= 394806)
+                            {
+                                versionString = "4.6.2";
+                            }
+                            else if (release > 394806)
+                            {
+                                versionString = "4.7.0";
+                            }
+                            else
+                            {
+                                executionContext.Debug($"Release '{release}' did not fall into an expected range.");
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(versionString))
+                        {
+                            continue;
+                        }
+
+                        executionContext.Debug($"Interpreted version: {versionString}");
+                        versions.Add(new Version(versionString));
+                    }
+                }
+            }
+
+            executionContext.Debug($"Found {versions.Count} versions:");
+            foreach (Version versionObject in versions)
+            {
+                executionContext.Debug($" {versionObject}");
+            }
+
+            Interlocked.CompareExchange(ref _versions, versions, null);
+        }
+
+        private static string[] GetHklmSubKeyNames(AgentTaskPluginExecutionContext executionContext, string keyName)
+        {
+            RegistryKey key = Registry.LocalMachine.OpenSubKey(keyName);
+            if (key == null)
+            {
+                executionContext.Debug($"Key name '{keyName}' is null.");
+                return new string[0];
+            }
+
+            try
+            {
+                string[] subKeyNames = key.GetSubKeyNames() ?? new string[0];
+                executionContext.Debug($"Key name '{keyName}' contains sub keys:");
+                foreach (string subKeyName in subKeyNames)
+                {
+                    executionContext.Debug($" '{subKeyName}'");
+                }
+
+                return subKeyNames;
+            }
+            finally
+            {
+                key.Dispose();
+            }
+        }
+
+        private static object GetHklmValue(AgentTaskPluginExecutionContext executionContext, string keyName, string valueName)
+        {
+            keyName = $@"HKEY_LOCAL_MACHINE\{keyName}";
+            object value = Registry.GetValue(keyName, valueName, defaultValue: null);
+            if (object.ReferenceEquals(value, null))
+            {
+                executionContext.Debug($"Key name '{keyName}', value name '{valueName}' is null.");
+                return null;
+            }
+
+            executionContext.Debug($"Key name '{keyName}', value name '{valueName}': '{value}'");
+            return value;
+        }
+        #endregion
 
         #region StringUtil
         public static T ConvertFromJson<T>(string value)
@@ -627,6 +841,34 @@ namespace Agent.PluginCore
             {
                 item.Attributes = item.Attributes & ~FileAttributes.ReadOnly;
             }
+        }
+        #endregion
+
+        #region VarUtil
+        public static string PrependPath(string path, string currentPath)
+        {
+            PluginUtil.NotNullOrEmpty(path, nameof(path));
+            if (string.IsNullOrEmpty(currentPath))
+            {
+                // Careful not to add a trailing separator if the PATH is empty.
+                // On OSX/Linux, a trailing separator indicates that "current directory"
+                // is added to the PATH, which is considered a security risk.
+                return path;
+            }
+
+            return path + Path.PathSeparator + currentPath;
+        }
+
+        public static void PrependPath(string directory)
+        {
+            PluginUtil.DirectoryExists(directory, nameof(directory));
+
+            // Build the new value.
+            string currentPath = Environment.GetEnvironmentVariable("PATH");
+            string path = PrependPath(directory, currentPath);
+
+            // Update the PATH environment variable.
+            Environment.SetEnvironmentVariable("PATH", path);
         }
         #endregion
 

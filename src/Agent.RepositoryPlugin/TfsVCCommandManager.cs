@@ -182,7 +182,7 @@ namespace Agent.RepositoryPlugin
             PluginUtil.Equal(EndpointAuthorizationSchemes.OAuth, Endpoint.Authorization.Scheme, nameof(Endpoint.Authorization.Scheme));
             string accessToken = Endpoint.Authorization.Parameters.TryGetValue(EndpointAuthorizationParameters.AccessToken, out accessToken) ? accessToken : null;
             PluginUtil.NotNullOrEmpty(accessToken, EndpointAuthorizationParameters.AccessToken);
-            PluginUtil.NotNull(Endpoint.Url, nameof(Endpoint.Url));
+            PluginUtil.NotNull(Repository.Url, nameof(Repository.Url));
 
             // Format each arg.
             var formattedArgs = new List<string>();
@@ -191,7 +191,7 @@ namespace Agent.RepositoryPlugin
                 // Validate the arg.
                 if (!string.IsNullOrEmpty(arg) && arg.IndexOfAny(new char[] { '"', '\r', '\n' }) >= 0)
                 {
-                    throw new Exception("InvalidCommandArg {arg}");
+                    throw new Exception(PluginUtil.Loc("InvalidCommandArg", arg));
                 }
 
                 // Add the arg.
@@ -203,7 +203,7 @@ namespace Agent.RepositoryPlugin
             {
                 if (Features.HasFlag(TfsVCFeatures.EscapedUrl))
                 {
-                    formattedArgs.Add($"{Switch}collection:{Endpoint.Url.AbsoluteUri}");
+                    formattedArgs.Add($"{Switch}collection:{Repository.Url.AbsoluteUri}");
                 }
                 else
                 {
@@ -211,14 +211,14 @@ namespace Agent.RepositoryPlugin
                     string url;
                     try
                     {
-                        url = Uri.UnescapeDataString(Endpoint.Url.AbsoluteUri);
+                        url = Uri.UnescapeDataString(Repository.Url.AbsoluteUri);
                     }
                     catch (Exception ex)
                     {
                         // Unlikely (impossible?), but don't fail if encountered. If we don't hear complaints
                         // about this warning then it is likely OK to remove the try/catch altogether and have
                         // faith that UnescapeDataString won't throw for this scenario.
-                        url = Endpoint.Url.AbsoluteUri;
+                        url = Repository.Url.AbsoluteUri;
                         ExecutionContext.Warning($"{ex.Message} ({url})");
                     }
 
