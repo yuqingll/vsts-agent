@@ -8,7 +8,7 @@ using System;
 using Newtonsoft.Json.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.Services.Agent.Worker.Container;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Microsoft.VisualStudio.Services.WebApi;
 
@@ -33,8 +33,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker.Handlers
             ArgUtil.NotNull(Inputs, nameof(Inputs));
             ArgUtil.NotNullOrEmpty(Data.Target, nameof(Data.Target));
 
+            // Update the env dictionary.
+            AddPrependPathToEnvironment();
+
             var agentPlugin = HostContext.GetService<IAgentPluginManager>();
-            await agentPlugin.RunPluginTaskAsync(ExecutionContext, Data.Target, Inputs, Data.Stage, OnDataReceived);
+            await agentPlugin.RunPluginTaskAsync(ExecutionContext, Data.Target, Inputs, Environment, Data.Stage, OnDataReceived);
         }
 
         private void OnDataReceived(object sender, ProcessDataReceivedEventArgs e)

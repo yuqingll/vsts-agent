@@ -1,5 +1,5 @@
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 using Microsoft.VisualStudio.Services.Agent.Util;
 using Microsoft.VisualStudio.Services.WebApi;
 using System;
@@ -17,15 +17,15 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public interface IAgentPluginManager : IAgentService
     {
         Dictionary<Guid, Dictionary<string, Definition>> SupportedTasks { get; }
-        Dictionary<string, Dictionary<string, string>> SupportedLoggingCommands { get; }
+        Dictionary<string, Dictionary<string, AgentCommandPluginInfo>> SupportedLoggingCommands { get; }
 
-        Task RunPluginTaskAsync(IExecutionContext context, string plugin, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler);
+        Task RunPluginTaskAsync(IExecutionContext context, string plugin, Dictionary<string, string> inputs, Dictionary<string, string> environment, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler);
         void ProcessCommand(IExecutionContext context, Command command);
     }
 
     public sealed class AgentPluginManager : AgentService, IAgentPluginManager
     {
-        private readonly Dictionary<string, Dictionary<string, string>> _supportedLoggingCommands = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Dictionary<string, AgentCommandPluginInfo>> _supportedLoggingCommands = new Dictionary<string, Dictionary<string, AgentCommandPluginInfo>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Guid, Dictionary<string, Definition>> _supportedTasks = new Dictionary<Guid, Dictionary<string, Definition>>();
 
         private readonly List<AgentPluginInfo> _taskPlugins = new List<AgentPluginInfo>()
@@ -46,7 +46,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         };
 
-        public Dictionary<string, Dictionary<string, string>> SupportedLoggingCommands => _supportedLoggingCommands;
+        public Dictionary<string, Dictionary<string, AgentCommandPluginInfo>> SupportedLoggingCommands => _supportedLoggingCommands;
         public Dictionary<Guid, Dictionary<string, Definition>> SupportedTasks => _supportedTasks;
 
         public override void Initialize(IHostContext hostContext)
@@ -61,6 +61,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 AssemblyLoadContext.Default.Resolving += ResolveAssembly;
                 try
                 {
+                    Trace.Info($"Load task plugin from '{typeName}'.");
                     Type type = Type.GetType(typeName, throwOnError: true);
                     taskPlugin = Activator.CreateInstance(type) as IAgentTaskPlugin;
                 }
@@ -77,6 +78,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     _supportedTasks[taskPlugin.Id] = new Dictionary<string, Definition>(StringComparer.OrdinalIgnoreCase);
                 }
 
+                Trace.Info($"Loaded task plugin id '{taskPlugin.Id}' ({taskPlugin.Version}).");
                 _supportedTasks[taskPlugin.Id][taskPlugin.Version] = new Definition() { Directory = HostContext.GetDirectory(WellKnownDirectory.Work) };
                 _supportedTasks[taskPlugin.Id][taskPlugin.Version].Data = new DefinitionData()
                 {
@@ -132,6 +134,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 AssemblyLoadContext.Default.Resolving += ResolveAssembly;
                 try
                 {
+                    Trace.Info($"Load command plugin from '{typeName}'.");
                     Type type = Type.GetType(typeName, throwOnError: true);
                     commandPlugin = Activator.CreateInstance(type) as IAgentCommandPlugin;
                 }
@@ -143,22 +146,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 ArgUtil.NotNull(commandPlugin, nameof(commandPlugin));
                 ArgUtil.NotNullOrEmpty(commandPlugin.Area, nameof(commandPlugin.Area));
                 ArgUtil.NotNullOrEmpty(commandPlugin.Event, nameof(commandPlugin.Event));
+                ArgUtil.NotNullOrEmpty(commandPlugin.DisplayName, nameof(commandPlugin.DisplayName));
 
                 if (!_supportedLoggingCommands.ContainsKey(commandPlugin.Area))
                 {
-                    _supportedLoggingCommands[commandPlugin.Area] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    _supportedLoggingCommands[commandPlugin.Area] = new Dictionary<string, AgentCommandPluginInfo>(StringComparer.OrdinalIgnoreCase);
                 }
-                _supportedLoggingCommands[commandPlugin.Area][commandPlugin.Event] = typeName;
+
+                Trace.Info($"Loaded command plugin to handle '##vso[{commandPlugin.Area}.{commandPlugin.Event}]'.");
+                _supportedLoggingCommands[commandPlugin.Area][commandPlugin.Event] = new AgentCommandPluginInfo() { CommandPluginTypeName = typeName, DisplayName = commandPlugin.DisplayName };
             }
         }
 
-        private Assembly ResolveAssembly(AssemblyLoadContext context, AssemblyName assembly)
-        {
-            string assemblyFilename = assembly.Name + ".dll";
-            return context.LoadFromAssemblyPath(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), assemblyFilename));
-        }
-
-        public async Task RunPluginTaskAsync(IExecutionContext context, string plugin, Dictionary<string, string> inputs, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler)
+        public async Task RunPluginTaskAsync(IExecutionContext context, string plugin, Dictionary<string, string> inputs, Dictionary<string, string> environment, string stage, EventHandler<ProcessDataReceivedEventArgs> outputHandler)
         {
             ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
 
@@ -168,6 +168,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Agent.PluginHost
             string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
+            ArgUtil.File(file, $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
 
             // Agent.PluginHost's arguments
             string arguments = $"task \"{plugin}\"";
@@ -210,7 +211,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
                                                   fileName: file,
                                                   arguments: arguments,
-                                                  environment: GetTaskPluginEnvironment(context),
+                                                  environment: environment,
                                                   requireExitCodeZero: true,
                                                   outputEncoding: null,
                                                   killProcessOnCancel: false,
@@ -222,113 +223,98 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public void ProcessCommand(IExecutionContext context, Command command)
         {
             // queue async command task to run agent plugin.
-            context.Debug($"Process {command.Area}.{command.Event} command at backend.");
-            var commandContext = HostContext.CreateService<IAsyncCommandContext>();
-            commandContext.InitializeCommandContext(context, "Process Command");
-            commandContext.Task = ProcessPluginCommandAsync(commandContext, command, context.CancellationToken);
-            context.AsyncCommands.Add(commandContext);
-        }
-
-        private async Task ProcessPluginCommandAsync(IAsyncCommandContext context, Command command, CancellationToken token)
-        {
-            if (_supportedLoggingCommands.ContainsKey(command.Area) && _supportedLoggingCommands[command.Area].ContainsKey(command.Event))
-            {
-                var plugin = _supportedLoggingCommands[command.Area][command.Event];
-                ArgUtil.NotNullOrEmpty(plugin, nameof(plugin));
-
-                // Resolve the working directory.
-                string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
-                ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
-
-                // Agent.PluginHost
-                string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
-
-                // Agent.PluginHost's arguments
-                string arguments = $"command \"{plugin}\"";
-
-                // construct plugin context
-                AgentCommandPluginExecutionContext pluginContext = new AgentCommandPluginExecutionContext
-                {
-                    Data = command.Data,
-                    Properties = command.Properties,
-                    Repositories = context.RawContext.Repositories,
-                    Endpoints = context.RawContext.Endpoints,
-                };
-                // variables
-                foreach (var publicVar in context.RawContext.Variables.Public)
-                {
-                    pluginContext.Variables[publicVar.Key] = publicVar.Value;
-                }
-                foreach (var publicVar in context.RawContext.Variables.Private)
-                {
-                    pluginContext.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
-                }
-
-                using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
-                {
-                    object stderrLock = new object();
-                    List<string> stderr = new List<string>();
-                    processInvoker.OutputDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
-                    {
-                        context.Output(e.Data);
-                    };
-                    processInvoker.ErrorDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
-                    {
-                        lock (stderrLock)
-                        {
-                            stderr.Add(e.Data);
-                        };
-                    }; ;
-
-                    // Execute the process. Exit code 0 should always be returned.
-                    // A non-zero exit code indicates infrastructural failure.
-                    // Task failure should be communicated over STDOUT using ## commands.
-                    int returnCode = await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
-                                                      fileName: file,
-                                                      arguments: arguments,
-                                                      environment: null,
-                                                      requireExitCodeZero: false,
-                                                      outputEncoding: null,
-                                                      killProcessOnCancel: false,
-                                                      contentsToStandardIn: new List<string>() { JsonUtility.ToString(pluginContext) },
-                                                      cancellationToken: token);
-
-                    if (returnCode != 0)
-                    {
-                        context.Output(string.Join(Environment.NewLine, stderr));
-                        throw new ProcessExitCodeException(returnCode, file, arguments);
-                    }
-                    else if (stderr.Count > 0)
-                    {
-                        throw new InvalidOperationException(string.Join(Environment.NewLine, stderr));
-                    }
-                }
-            }
-            else
+            context.Debug($"Process {command.Area}.{command.Event} command through agent plugin in backend.");
+            if (!_supportedLoggingCommands.ContainsKey(command.Area) ||
+                !_supportedLoggingCommands[command.Area].ContainsKey(command.Event))
             {
                 throw new NotSupportedException(command.ToString());
             }
-        }
 
-        private Dictionary<string, string> GetTaskPluginEnvironment(IExecutionContext context)
-        {
-            ArgUtil.NotNull(context, nameof(context));
-            if (context.PrependPath.Count == 0)
+            var plugin = _supportedLoggingCommands[command.Area][command.Event];
+            ArgUtil.NotNull(plugin, nameof(plugin));
+            ArgUtil.NotNullOrEmpty(plugin.DisplayName, nameof(plugin.DisplayName));
+
+            // construct plugin context
+            AgentCommandPluginExecutionContext pluginContext = new AgentCommandPluginExecutionContext
             {
-                return null;
+                Data = command.Data,
+                Properties = command.Properties,
+                Endpoints = context.Endpoints,
+            };
+            // variables
+            foreach (var publicVar in context.Variables.Public)
+            {
+                pluginContext.Variables[publicVar.Key] = publicVar.Value;
+            }
+            foreach (var publicVar in context.Variables.Private)
+            {
+                pluginContext.Variables[publicVar.Key] = new VariableValue(publicVar.Value, true);
             }
 
-            // Prepend path.
-            string prepend = string.Join(Path.PathSeparator.ToString(), context.PrependPath.Reverse<string>());
-            string originalPath = context.Variables.Get(Constants.PathVariable) ?? // Prefer a job variable.
-                System.Environment.GetEnvironmentVariable(Constants.PathVariable) ?? // Then an environment variable.
-                string.Empty;
-            string newPath = VarUtil.PrependPath(prepend, originalPath);
+            var commandContext = HostContext.CreateService<IAsyncCommandContext>();
+            commandContext.InitializeCommandContext(context, plugin.DisplayName);
+            commandContext.Task = ProcessPluginCommandAsync(commandContext, pluginContext, plugin.CommandPluginTypeName, command, context.CancellationToken);
+            context.AsyncCommands.Add(commandContext);
+        }
 
-            Dictionary<string, string> env = new Dictionary<string, string>(VarUtil.EnvironmentVariableKeyComparer);
-            env[Constants.PathVariable] = newPath;
+        private async Task ProcessPluginCommandAsync(IAsyncCommandContext context, AgentCommandPluginExecutionContext pluginContext, string plugin, Command command, CancellationToken token)
+        {
+            // Resolve the working directory.
+            string workingDirectory = HostContext.GetDirectory(WellKnownDirectory.Bin);
+            ArgUtil.Directory(workingDirectory, nameof(workingDirectory));
 
-            return env;
+            // Agent.PluginHost
+            string file = Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), $"Agent.PluginHost{Util.IOUtil.ExeExtension}");
+
+            // Agent.PluginHost's arguments
+            string arguments = $"command \"{plugin}\"";
+
+            // Execute the process. Exit code 0 should always be returned.
+            // A non-zero exit code indicates infrastructural failure.
+            // Any content coming from STDERR will indicate the command process failed.
+            // We can't use ## command for plugin to communicate, since we are already processing ## command
+            using (var processInvoker = HostContext.CreateService<IProcessInvoker>())
+            {
+                object stderrLock = new object();
+                List<string> stderr = new List<string>();
+                processInvoker.OutputDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
+                {
+                    context.Output(e.Data);
+                };
+                processInvoker.ErrorDataReceived += (object sender, ProcessDataReceivedEventArgs e) =>
+                {
+                    lock (stderrLock)
+                    {
+                        stderr.Add(e.Data);
+                    };
+                }; ;
+
+                int returnCode = await processInvoker.ExecuteAsync(workingDirectory: workingDirectory,
+                                                                   fileName: file,
+                                                                   arguments: arguments,
+                                                                   environment: null,
+                                                                   requireExitCodeZero: false,
+                                                                   outputEncoding: null,
+                                                                   killProcessOnCancel: false,
+                                                                   contentsToStandardIn: new List<string>() { JsonUtility.ToString(pluginContext) },
+                                                                   cancellationToken: token);
+
+                if (returnCode != 0)
+                {
+                    context.Output(string.Join(Environment.NewLine, stderr));
+                    throw new ProcessExitCodeException(returnCode, file, arguments);
+                }
+                else if (stderr.Count > 0)
+                {
+                    throw new InvalidOperationException(string.Join(Environment.NewLine, stderr));
+                }
+            }
+        }
+
+        private Assembly ResolveAssembly(AssemblyLoadContext context, AssemblyName assembly)
+        {
+            string assemblyFilename = assembly.Name + ".dll";
+            return context.LoadFromAssemblyPath(Path.Combine(HostContext.GetDirectory(WellKnownDirectory.Bin), assemblyFilename));
         }
     }
 
@@ -336,5 +322,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     {
         public string AgentPluginAssembly { get; set; }
         public string AgentPluginEntryPoint { get; set; }
+    }
+
+    public class AgentCommandPluginInfo
+    {
+        public string CommandPluginTypeName { get; set; }
+        public string DisplayName { get; set; }
     }
 }

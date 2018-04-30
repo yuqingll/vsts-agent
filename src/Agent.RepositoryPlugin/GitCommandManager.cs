@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 
 namespace Agent.RepositoryPlugin
 {

@@ -1,4 +1,4 @@
-﻿using Microsoft.VisualStudio.Services.Agent.PluginCore;
+﻿using Agent.PluginCore;
 using Microsoft.VisualStudio.Services.FileContainer.Client;
 using System;
 using System.Collections.Concurrent;

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.TeamFoundation.Build.WebApi;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 
 namespace Agent.DropPlugin
 {
@@ -14,6 +14,8 @@ namespace Agent.DropPlugin
         public string Area => "artifact";
 
         public string Event => "upload";
+
+        public string DisplayName => PluginUtil.Loc("UploadArtifact");
 
         public async Task ProcessCommandAsync(AgentCommandPluginExecutionContext context, CancellationToken token)
         {
@@ -77,7 +79,7 @@ namespace Agent.DropPlugin
             else if (Directory.Exists(fullPath) && Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories).FirstOrDefault() == null)
             {
                 // if localPath is a folder but the folder contains nothing
-                context.Warning(PluginUtil.Loc("DirectoryIsEmptyForArtifact", fullPath, artifactName));
+                context.Output(PluginUtil.Loc("DirectoryIsEmptyForArtifact", fullPath, artifactName));
                 return;
             }
 

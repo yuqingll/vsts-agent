@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Xml.Serialization;
 using Microsoft.TeamFoundation.Build.WebApi;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
 namespace Agent.RepositoryPlugin

@@ -4,10 +4,10 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
-using Microsoft.VisualStudio.Services.Agent.PluginCore;
+using Agent.PluginCore;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 
-namespace Microsoft.VisualStudio.Services.Agent.PluginHost
+namespace Agent.PluginHost
 {
     public static class Program
     {

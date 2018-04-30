@@ -8,7 +8,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public interface IAsyncCommandContext : IAgentService
     {
         string Name { get; }
-        IExecutionContext RawContext { get; }
         Task Task { get; set; }
         void InitializeCommandContext(IExecutionContext context, string name);
         void Output(string message);
@@ -40,7 +39,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private readonly ConcurrentQueue<OutputMessage> _outputQueue = new ConcurrentQueue<OutputMessage>();
 
         public string Name { get; private set; }
-        public IExecutionContext RawContext => _executionContext;
         public Task Task { get; set; }
 
         public void InitializeCommandContext(IExecutionContext context, string name)

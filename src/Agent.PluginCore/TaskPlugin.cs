@@ -25,7 +25,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
-namespace Microsoft.VisualStudio.Services.Agent.PluginCore
+namespace Agent.PluginCore
 {
     public interface IAgentTaskPlugin
     {

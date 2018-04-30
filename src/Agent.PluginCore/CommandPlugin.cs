@@ -25,12 +25,13 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 
-namespace Microsoft.VisualStudio.Services.Agent.PluginCore
+namespace Agent.PluginCore
 {
     public interface IAgentCommandPlugin
     {
         String Area { get; }
         String Event { get; }
+        String DisplayName { get; }
         Task ProcessCommandAsync(AgentCommandPluginExecutionContext executionContext, CancellationToken token);
     }
 
@@ -42,7 +43,6 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         {
             this.Endpoints = new List<ServiceEndpoint>();
             this.Properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            this.Repositories = new List<Pipelines.RepositoryResource>();
             this.Variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
 
 #if OS_WINDOWS
@@ -55,7 +55,6 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         public string Data { get; set; }
         public Dictionary<string, string> Properties { get; set; }
         public List<ServiceEndpoint> Endpoints { get; set; }
-        public List<Pipelines.RepositoryResource> Repositories { get; set; }
         public Dictionary<string, VariableValue> Variables { get; set; }
         public Dictionary<string, string> ContainerPathMappings { get; set; }
 
@@ -83,16 +82,6 @@ namespace Microsoft.VisualStudio.Services.Agent.PluginCore
         public void Output(string message)
         {
             Console.WriteLine(message);
-        }
-
-        public void Error(string message)
-        {
-            Console.WriteLine($"##vso[task.logissue type=error;]{message}");
-        }
-
-        public void Warning(string message)
-        {
-            Console.WriteLine($"##vso[task.logissue type=warning;]{message}");
         }
 
         public void Fail(string message)
