@@ -1024,27 +1024,6 @@ namespace Agent.PluginCore
                 cancellationToken: cancellationToken);
         }
 
-        public Task<int> ExecuteAsync(
-            string workingDirectory,
-            string fileName,
-            string arguments,
-            IDictionary<string, string> environment,
-            bool requireExitCodeZero,
-            Encoding outputEncoding,
-            CancellationToken cancellationToken)
-        {
-            return ExecuteAsync(
-                workingDirectory: workingDirectory,
-                fileName: fileName,
-                arguments: arguments,
-                environment: environment,
-                requireExitCodeZero: requireExitCodeZero,
-                outputEncoding: outputEncoding,
-                killProcessOnCancel: false,
-                contentsToStandardIn: null,
-                cancellationToken: cancellationToken);
-        }
-
         public async Task<int> ExecuteAsync(
             string workingDirectory,
             string fileName,
@@ -1052,8 +1031,6 @@ namespace Agent.PluginCore
             IDictionary<string, string> environment,
             bool requireExitCodeZero,
             Encoding outputEncoding,
-            bool killProcessOnCancel,
-            IList<string> contentsToStandardIn,
             CancellationToken cancellationToken)
         {
             PluginUtil.Null(_proc, nameof(_proc));
@@ -1065,8 +1042,6 @@ namespace Agent.PluginCore
             executionContext.Debug($"  Working directory: '{workingDirectory}'");
             executionContext.Debug($"  Require exit code zero: '{requireExitCodeZero}'");
             executionContext.Debug($"  Encoding web name: {outputEncoding?.WebName} ; code page: '{outputEncoding?.CodePage}'");
-            executionContext.Debug($"  Force kill process on cancellation: '{killProcessOnCancel}'");
-            executionContext.Debug($"  Lines to send through STDIN: '{contentsToStandardIn?.Count ?? 0}'");
 
             _proc = new Process();
             _proc.StartInfo.FileName = fileName;
@@ -1126,15 +1101,6 @@ namespace Agent.PluginCore
 
             if (_proc.StartInfo.RedirectStandardInput)
             {
-                // Write contents to STDIN
-                if (contentsToStandardIn?.Count > 0)
-                {
-                    foreach (var content in contentsToStandardIn)
-                    {
-                        _proc.StandardInput.WriteLine(content);
-                    }
-                }
-
                 // Close the input stream. This is done to prevent commands from blocking the build waiting for input from the user.
                 _proc.StandardInput.Close();
             }
@@ -1151,7 +1117,7 @@ namespace Agent.PluginCore
                 StartReadStream(_proc.StandardOutput, _outputData);
             }
 
-            using (var registration = cancellationToken.Register(async () => await CancelAndKillProcessTree(killProcessOnCancel)))
+            using (var registration = cancellationToken.Register(async () => await CancelAndKillProcessTree()))
             {
                 executionContext.Debug($"Process started with process id {_proc.Id}, waiting for process exit.");
                 while (true)
@@ -1251,24 +1217,21 @@ namespace Agent.PluginCore
             }
         }
 
-        private async Task CancelAndKillProcessTree(bool killProcessOnCancel)
+        private async Task CancelAndKillProcessTree()
         {
             PluginUtil.NotNull(_proc, nameof(_proc));
-            if (!killProcessOnCancel)
+            bool sigint_succeed = await SendSIGINT(_sigintTimeout);
+            if (sigint_succeed)
             {
-                bool sigint_succeed = await SendSIGINT(_sigintTimeout);
-                if (sigint_succeed)
-                {
-                    executionContext.Debug("Process cancelled successfully through Ctrl+C/SIGINT.");
-                    return;
-                }
+                executionContext.Debug("Process cancelled successfully through Ctrl+C/SIGINT.");
+                return;
+            }
 
-                bool sigterm_succeed = await SendSIGTERM(_sigtermTimeout);
-                if (sigterm_succeed)
-                {
-                    executionContext.Debug("Process terminate successfully through Ctrl+Break/SIGTERM.");
-                    return;
-                }
+            bool sigterm_succeed = await SendSIGTERM(_sigtermTimeout);
+            if (sigterm_succeed)
+            {
+                executionContext.Debug("Process terminate successfully through Ctrl+Break/SIGTERM.");
+                return;
             }
 
             executionContext.Debug("Kill entire process tree since both cancel and terminate signal has been ignored by the target process.");

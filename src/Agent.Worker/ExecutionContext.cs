@@ -450,7 +450,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             var runtimeOptions = HostContext.GetService<IConfigurationStore>().GetAgentRuntimeOptions();
             if (runtimeOptions != null)
             {
+#if OS_WINDOWS                
                 Variables.Set(Constants.Variables.Agent.GitUseSChannel, runtimeOptions.GitUseSecureChannel.ToString());
+#endif                
             }
 
             // Job timeline record.
