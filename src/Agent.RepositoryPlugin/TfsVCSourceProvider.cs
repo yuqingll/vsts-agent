@@ -437,7 +437,7 @@ namespace Agent.RepositoryPlugin
 #if OS_WINDOWS
                 var tf = new TFCommandManager();
 #else
-                var tf = new TEECommandManager();
+                var tf = new TeeCommandManager();
 #endif
                 tf.CancellationToken = CancellationToken.None;
                 tf.Repository = repository;

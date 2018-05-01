@@ -370,10 +370,10 @@ namespace Agent.RepositoryPlugin
 
 #if !OS_WINDOWS
                         string toolPath = PluginUtil.Which("chmod", true);
-                        string argLine = $"775 {_clientCertPrivateKeyAskPassFile}";
+                        string argLine = $"775 {clientCertPrivateKeyAskPassFile}";
                         executionContext.Command($"chmod {argLine}");
 
-                        var processInvoker = HostContext.CreateService<IProcessInvoker>();
+                        var processInvoker = new ProcessInvoker(executionContext);
                         processInvoker.OutputDataReceived += (object sender, ProcessDataReceivedEventArgs args) =>
                         {
                             if (!string.IsNullOrEmpty(args.Data))
@@ -389,7 +389,7 @@ namespace Agent.RepositoryPlugin
                             }
                         };
 
-                        await processInvoker.ExecuteAsync(executionContext.Variables.System_DefaultWorkingDirectory, toolPath, argLine, null, true, CancellationToken.None);
+                        await processInvoker.ExecuteAsync(executionContext.Variables.GetValueOrDefault("system.defaultworkingdirectory")?.Value, toolPath, argLine, null, true, CancellationToken.None);
 #endif
                     }
                 }
